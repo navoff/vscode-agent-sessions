@@ -22,9 +22,10 @@ const TITLE_MAX = 80;
 // (guardian reviews, spawned subagents) carry an object `source` with a
 // `subagent` field, a non-user `thread_source`, or a `parent_thread_id`.
 export function isUserThreadPayload(p: Record<string, unknown>): boolean {
-  if (typeof p.thread_source === "string") return p.thread_source === "user";
   if (typeof p.parent_thread_id === "string") return false;
-  return typeof p.source !== "object" || p.source === null;
+  if (typeof p.source === "object" && p.source !== null) return false;
+  if (typeof p.thread_source === "string") return p.thread_source === "user";
+  return true;
 }
 
 export function parseRolloutMeta(firstLine: string): CodexRolloutMeta | undefined {

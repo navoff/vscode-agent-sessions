@@ -19,6 +19,10 @@ test("parseRolloutMeta recognises user, guardian and legacy threads", () => {
   assert.equal(legacy?.isUserThread, true);
   assert.equal(parseRolloutMeta("{}"), undefined);
   assert.equal(parseRolloutMeta("garbage"), undefined);
+  const userWithParent = parseRolloutMeta(meta({ id: "c1", thread_source: "user", parent_thread_id: "u1", cwd: "/w" }));
+  assert.equal(userWithParent?.isUserThread, false);
+  const userWithSource = parseRolloutMeta(meta({ id: "c2", thread_source: "user", source: { subagent: { other: "guardian" } } }));
+  assert.equal(userWithSource?.isUserThread, false);
 });
 
 test("titleFromUserText skips system blocks and trims to first line", () => {
@@ -40,6 +44,13 @@ test("statusFromTail follows the last task event", () => {
   assert.equal(statusFromTail([event("task_started"), event("task_complete")].join("\n")), "idle");
   assert.equal(statusFromTail([event("task_started"), event("turn_aborted")].join("\n")), "idle");
   assert.equal(statusFromTail(""), "idle");
+});
+
+test("statusFromTail ignores task events quoted inside messages", () => {
+  const msgWithQuotedEvent = userMsg('The error message was "type":"task_started"');
+  const tail = [msgWithQuotedEvent, event("task_complete")].join("\n");
+  assert.equal(statusFromTail(tail), "idle");
+  assert.equal(statusFromTail(msgWithQuotedEvent), "idle");
 });
 
 test("readRolloutInfo reads meta, title and status from a file", async () => {
