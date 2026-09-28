@@ -42,3 +42,16 @@ test("stdio session answers hello and snapshot, exits on stdin close", async () 
   assert.ok(lines[1].sessions.some((s: { agent: string; id: string }) => s.agent === "codex" && s.id === "u1"));
   assert.equal(r.code, 0);
 });
+
+test("protocol mismatch answers error and exits promptly", async () => {
+  const home = await mkdtemp(join(tmpdir(), "home-"));
+  const start = Date.now();
+  const r = await run(["--stdio"], { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") },
+    '{"type":"hello","protocol":99}\n{"type":"ping"}\n');
+  const elapsed = Date.now() - start;
+  const lines = r.out.trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines[0].type, "error");
+  assert.equal(lines.length, 1);
+  assert.equal(r.code, 0);
+  assert.ok(elapsed < 2000, `expected prompt exit, took ${elapsed}ms`);
+});

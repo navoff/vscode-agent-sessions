@@ -8,12 +8,11 @@ import { parseClientMessage, type DaemonMessage } from "./protocol.js";
 declare const __DAEMON_VERSION__: string | undefined;
 const VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : "0.0.0-dev";
 
-// Every message Daemon#handle() processes results in exactly one send() call,
-// either synchronously (hello, ping, hello-protocol-mismatch error) or after an
-// async refresh (snapshot). On stdin close we must let any in-flight async send
-// land before stopping the daemon and exiting, otherwise a "snapshot" requested
-// just before the client disconnects can be dropped silently. EXIT_GRACE_MS caps
-// how long we wait for a stuck provider before exiting anyway.
+// On stdin close we must let any in-flight refresh (triggered by a "snapshot"
+// message) land before stopping the daemon and exiting, otherwise the reply can
+// be dropped silently. EXIT_GRACE_MS caps how long we wait for a stuck provider
+// before exiting anyway; stop() only runs after the wait, since stopping first
+// would suppress the pending send.
 const EXIT_GRACE_MS = 5000;
 
 export function main(argv: string[]): void {
@@ -27,9 +26,7 @@ export function main(argv: string[]): void {
     new ClaudeProvider({ claudeDir: process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"), log }),
     new CodexProvider({ codexDir: process.env.CODEX_HOME ?? join(home, ".codex"), log }),
   ];
-  let pending = 0;
   const send = (m: DaemonMessage) => {
-    if (pending > 0) pending--;
     process.stdout.write(JSON.stringify(m) + "\n");
   };
   const daemon = new Daemon({ providers, send, version: VERSION, home, log });
@@ -41,23 +38,13 @@ export function main(argv: string[]): void {
       send({ type: "error", message: `bad message: ${line.slice(0, 200)}` });
       return;
     }
-    pending++;
     daemon.handle(msg);
   });
   rl.on("close", () => {
-    const deadline = Date.now() + EXIT_GRACE_MS;
-    const finish = () => {
+    void Promise.race([daemon.drain(), new Promise<void>((r) => setTimeout(r, EXIT_GRACE_MS).unref())]).then(() => {
       daemon.stop();
       process.exit(0);
-    };
-    const waitForPending = () => {
-      if (pending <= 0 || Date.now() >= deadline) {
-        finish();
-        return;
-      }
-      setImmediate(waitForPending);
-    };
-    waitForPending();
+    });
   });
 }
 

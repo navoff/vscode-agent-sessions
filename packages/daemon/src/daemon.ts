@@ -33,6 +33,7 @@ export class Daemon {
   private pendingIncremental = false;
   private started = false;
   private stopped = false;
+  private inFlight: Promise<void> | undefined;
   private readonly debounceMs: number;
   private readonly pollMs: number;
   private readonly log: (msg: string) => void;
@@ -106,34 +107,41 @@ export class Daemon {
     return next;
   }
 
+  private async runRefresh(full: boolean): Promise<void> {
+    const next = await this.collect();
+    if (this.stopped) return;
+    if (full) {
+      this.current = next;
+      this.opts.send({ type: "snapshot", sessions: [...next.values()] });
+      return;
+    }
+    const upserted: SessionInfo[] = [];
+    const removed: string[] = [];
+    for (const [k, s] of next) {
+      const prev = this.current.get(k);
+      if (!prev || !sameSession(prev, s)) upserted.push(s);
+    }
+    for (const k of this.current.keys()) if (!next.has(k)) removed.push(k);
+    this.current = next;
+    if (upserted.length > 0 || removed.length > 0) this.opts.send({ type: "changed", upserted, removed });
+  }
+
   private async refresh(full: boolean): Promise<void> {
     if (this.stopped) return;
     this.ensureStarted();
     if (this.refreshing) {
-      if (full) this.pendingFull ||= full;
+      if (full) this.pendingFull = true;
       else this.pendingIncremental = true;
       return;
     }
     this.refreshing = true;
+    const run = this.runRefresh(full);
+    this.inFlight = run;
     try {
-      const next = await this.collect();
-      if (this.stopped) return;
-      if (full) {
-        this.current = next;
-        this.opts.send({ type: "snapshot", sessions: [...next.values()] });
-        return;
-      }
-      const upserted: SessionInfo[] = [];
-      const removed: string[] = [];
-      for (const [k, s] of next) {
-        const prev = this.current.get(k);
-        if (!prev || !sameSession(prev, s)) upserted.push(s);
-      }
-      for (const k of this.current.keys()) if (!next.has(k)) removed.push(k);
-      this.current = next;
-      if (upserted.length > 0 || removed.length > 0) this.opts.send({ type: "changed", upserted, removed });
+      await run;
     } finally {
       this.refreshing = false;
+      this.inFlight = undefined;
       if (this.pendingFull) {
         this.pendingFull = this.pendingIncremental = false;
         void this.refresh(true);
@@ -142,5 +150,10 @@ export class Daemon {
         this.schedule();
       }
     }
+  }
+
+  /** Resolves when no refresh is running and no full refresh is queued. */
+  async drain(): Promise<void> {
+    while (this.inFlight) await this.inFlight;
   }
 }

@@ -144,6 +144,24 @@ test("stop during an in-flight refresh sends nothing and runs no further snapsho
   assert.equal(sent.length, before);
 });
 
+test("drain waits for the in-flight and queued full refresh", async () => {
+  const { sent, claude, daemon } = setup();
+  const gate = deferred();
+  claude.gate = gate.promise;
+  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  daemon.handle({ type: "snapshot" });
+  daemon.handle({ type: "snapshot" });
+  const d = daemon.drain();
+  await tick(10);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, "hello");
+  gate.resolve();
+  await d;
+  assert.equal(sent.filter((m) => m.type === "snapshot").length, 2);
+  await daemon.drain();
+  daemon.stop();
+});
+
 test("sameSession compares the fields that matter", () => {
   assert.ok(sameSession(s("claude", "a"), s("claude", "a")));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { status: "running" })));
