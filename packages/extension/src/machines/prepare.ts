@@ -53,7 +53,7 @@ async function step(name: string, progress: PrepareProgress, ssh: SshRunner, hos
 }
 
 async function nodeVersionAt(ssh: SshRunner, host: string, nodePath: string): Promise<string | undefined> {
-  const r = await ssh.run(host, `${nodePath} -p process.versions.node`);
+  const r = await ssh.run(host, `${shellQuote(nodePath)} -p process.versions.node`);
   return r.code === 0 && isNodeVersionSupported(r.stdout) ? nodePath : undefined;
 }
 
@@ -87,6 +87,6 @@ export async function prepareMachine(host: string, ssh: SshRunner, daemonSource:
   }
 
   await step("Copying daemon", progress, ssh, host, `mkdir -p ${shellQuote(dir)} && cat > ${shellQuote(remoteDaemonPath(remoteHome))}`, daemonSource);
-  const version = await step("Verifying daemon", progress, ssh, host, `${node} ${remoteDaemonPath(remoteHome)} --version`);
+  const version = await step("Verifying daemon", progress, ssh, host, `${shellQuote(node)} ${shellQuote(remoteDaemonPath(remoteHome))} --version`);
   return { remoteNode: node, daemonVersion: version.trim(), remoteHome };
 }
