@@ -25,6 +25,8 @@ test("readClaudeRegistry keeps only alive pids and newest per session", async ()
   await writeFile(join(dir, "101.json"), entry({ pid: 101, updatedAt: 20, status: "idle" }));
   await writeFile(join(dir, "102.json"), entry({ pid: 102, sessionId: "s2" }));
   await writeFile(join(dir, "notes.txt"), "ignore");
+  await writeFile(join(dir, "999.json"), "not json");
+  await writeFile(join(dir, "998.json"), JSON.stringify({ pid: 998 }));
   const reg = await readClaudeRegistry(dir, (pid) => pid !== 102);
   assert.equal(reg.size, 1);
   assert.equal(reg.get("s1")?.pid, 101);
