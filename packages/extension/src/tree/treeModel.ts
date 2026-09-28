@@ -87,6 +87,10 @@ function isWorkspace(cwd: string, folders: string[]): boolean {
   return folders.some((f) => cwd === f || cwd.startsWith(f + "/"));
 }
 
+function newestUpdatedAt(sessions: SessionNode[]): number {
+  return sessions.reduce((m, n) => Math.max(m, n.row.session.updatedAt), 0);
+}
+
 export function buildTree(
   machines: MachineInput[],
   rowsByMachine: Map<string, SessionRow[]>,
@@ -117,8 +121,8 @@ export function buildTree(
       const aw = machine.isLocal && isWorkspace(a.cwd, opts.workspaceFolders) ? 0 : 1;
       const bw = machine.isLocal && isWorkspace(b.cwd, opts.workspaceFolders) ? 0 : 1;
       if (aw !== bw) return aw - bw;
-      const al = a.sessions[0]?.row.session.updatedAt ?? 0;
-      const bl = b.sessions[0]?.row.session.updatedAt ?? 0;
+      const al = newestUpdatedAt(a.sessions);
+      const bl = newestUpdatedAt(b.sessions);
       return bl - al;
     });
     result.push({ kind: "machine", machine, projects });
