@@ -2,6 +2,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
+import { guardWatcher } from "../util/watch.js";
 import { isProcessAlive, readClaudeRegistry } from "./registry.js";
 
 export interface SdkSessionInfo {
@@ -74,7 +75,7 @@ export class ClaudeProvider implements SessionProvider {
     ];
     for (const [dir, recursive] of targets) {
       try {
-        watchers.push(watch(dir, { recursive }, () => onChange()));
+        watchers.push(guardWatcher(watch(dir, { recursive }, () => onChange()), (msg) => this.log(`claude: ${msg}`)));
       } catch (err) {
         this.log(`claude: cannot watch ${dir}: ${String(err)}`);
       }

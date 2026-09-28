@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, appendFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, appendFile, utimes, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSessionIndex } from "../codex/sessionIndex.js";
@@ -64,4 +64,37 @@ test("snapshot picks up appended events and falls back to the first prompt", asy
   await new Promise((r) => setTimeout(r, 20));
   await appendFile(file, event("task_started") + "\n");
   assert.equal((await p.snapshot())[0].status, "running");
+});
+
+async function makeDuplicateIdDir(): Promise<{ dir: string; newerFile: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "codex-dup-"));
+  const day27 = join(dir, "sessions", "2026", "09", "27");
+  const day28 = join(dir, "sessions", "2026", "09", "28");
+  await mkdir(day27, { recursive: true });
+  await mkdir(day28, { recursive: true });
+  const olderFile = join(day27, "rollout-2026-09-27T10-00-00-d1.jsonl");
+  const newerFile = join(day28, "rollout-2026-09-28T10-00-00-d1.jsonl");
+  await writeFile(
+    olderFile,
+    [meta({ id: "d1", timestamp: "2026-09-27T10:00:00.000Z", cwd: "/w", thread_source: "user" }), userMsg("older prompt")].join("\n") + "\n",
+  );
+  await writeFile(
+    newerFile,
+    [meta({ id: "d1", timestamp: "2026-09-28T10:00:00.000Z", cwd: "/w", thread_source: "user" }), userMsg("newer prompt")].join("\n") + "\n",
+  );
+  const olderTime = new Date("2026-09-27T10:00:00.000Z");
+  const newerTime = new Date("2026-09-28T11:00:00.000Z");
+  await utimes(olderFile, olderTime, olderTime);
+  await utimes(newerFile, newerTime, newerTime);
+  return { dir, newerFile };
+}
+
+test("snapshot keeps the newest file when two rollouts share an id", async () => {
+  const { dir, newerFile } = await makeDuplicateIdDir();
+  const newerStat = await stat(newerFile);
+  const p = new CodexProvider({ codexDir: dir });
+  const list = await p.snapshot();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, "d1");
+  assert.equal(list[0].updatedAt, Math.trunc(newerStat.mtimeMs));
 });

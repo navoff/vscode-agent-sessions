@@ -5,3 +5,4 @@ export * from "./codex/rollout.js";
 export * from "./codex/sessionIndex.js";
 export * from "./codex/discovery.js";
 export * from "./codex/provider.js";
+export * from "./util/watch.js";

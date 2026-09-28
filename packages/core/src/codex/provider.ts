@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
+import { guardWatcher } from "../util/watch.js";
 import { listRolloutFiles } from "./discovery.js";
 import { readRolloutInfo, type CodexRolloutInfo } from "./rollout.js";
 import { readSessionIndex } from "./sessionIndex.js";
@@ -36,7 +37,7 @@ export class CodexProvider implements SessionProvider {
       readSessionIndex(join(this.codexDir, "session_index.jsonl")),
     ]);
     const seen = new Set<string>();
-    const result: SessionInfo[] = [];
+    const result = new Map<string, SessionInfo>();
     for (const file of files) {
       seen.add(file);
       let st;
@@ -59,7 +60,9 @@ export class CodexProvider implements SessionProvider {
       const info = entry.info;
       if (!info || !info.meta.isUserThread) continue;
       const updatedAt = Math.trunc(st.mtimeMs);
-      result.push({
+      const existing = result.get(info.meta.id);
+      if (existing && existing.updatedAt >= updatedAt) continue;
+      result.set(info.meta.id, {
         agent: "codex",
         id: info.meta.id,
         title: titles.get(info.meta.id) ?? info.title ?? info.meta.id,
@@ -70,21 +73,29 @@ export class CodexProvider implements SessionProvider {
       });
     }
     for (const key of this.cache.keys()) if (!seen.has(key)) this.cache.delete(key);
-    return result;
+    return [...result.values()];
   }
 
   watch(onChange: () => void): Disposable {
     const watchers: FSWatcher[] = [];
     try {
-      watchers.push(watch(join(this.codexDir, "sessions"), { recursive: true }, () => onChange()));
+      watchers.push(
+        guardWatcher(
+          watch(join(this.codexDir, "sessions"), { recursive: true }, () => onChange()),
+          (msg) => this.log(`codex: ${msg}`),
+        ),
+      );
     } catch (err) {
       this.log(`codex: cannot watch sessions: ${String(err)}`);
     }
     try {
       watchers.push(
-        watch(this.codexDir, (_event, name) => {
-          if (name === "session_index.jsonl") onChange();
-        }),
+        guardWatcher(
+          watch(this.codexDir, (_event, name) => {
+            if (name === "session_index.jsonl") onChange();
+          }),
+          (msg) => this.log(`codex: ${msg}`),
+        ),
       );
     } catch (err) {
       this.log(`codex: cannot watch codex dir: ${String(err)}`);
