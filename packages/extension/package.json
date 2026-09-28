@@ -19,11 +19,11 @@
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "agentSessions", "title": "Agent Sessions", "icon": "resources/view-icon.svg" }
+        { "id": "agentSessionsPanel", "title": "Agent Sessions", "icon": "resources/view-icon.svg" }
       ]
     },
     "views": {
-      "agentSessions": [
+      "agentSessionsPanel": [
         { "id": "agentSessions.view", "name": "Sessions", "icon": "resources/view-icon.svg" }
       ]
     },

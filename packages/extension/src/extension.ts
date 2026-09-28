@@ -22,8 +22,15 @@ const FILTER_KEY = "agentSessions.filter";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const log = vscode.window.createOutputChannel("Agent Sessions");
-  context.subscriptions.push(log);
-  const appendLog = (line: string) => log.appendLine(line);
+  // The channel is registered for disposal at the end of activate(), after the
+  // connections, so that shutdown log lines never hit a disposed channel.
+  const appendLog = (line: string) => {
+    try {
+      log.appendLine(line);
+    } catch {
+      // channel already disposed during deactivation
+    }
+  };
 
   const store = new SessionStore(new SessionMarks(context.globalState));
   const connections = new Map<string, MachineConnection>();
@@ -221,6 +228,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (e.affectsConfiguration("agentSessions")) refresh();
     }),
     { dispose: () => { if (reloadTimer) clearTimeout(reloadTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
+    log,
   );
 
   await vscode.workspace.fs.createDirectory(context.globalStorageUri);
