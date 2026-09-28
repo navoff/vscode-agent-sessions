@@ -42,11 +42,11 @@ test("snapshot merges SDK sessions with the live registry", async () => {
   assert.equal(b.live, undefined);
 });
 
-test("snapshot survives an SDK failure", async () => {
+test("snapshot logs and rethrows an SDK failure", async () => {
   const claudeDir = await makeClaudeDir();
   const logs: string[] = [];
   const p = new ClaudeProvider({ claudeDir, listSessions: async () => { throw new Error("boom"); }, log: (m) => logs.push(m) });
-  assert.deepEqual(await p.snapshot(), []);
+  await assert.rejects(p.snapshot(), /boom/);
   assert.ok(logs.some((l) => l.includes("boom")));
 });
 

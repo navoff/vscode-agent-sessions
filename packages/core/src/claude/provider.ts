@@ -44,13 +44,15 @@ export class ClaudeProvider implements SessionProvider {
   }
 
   async snapshot(): Promise<SessionInfo[]> {
-    const [sessions, registry] = await Promise.all([
-      this.listSessions().catch((err: unknown) => {
-        this.log(`claude: listSessions failed: ${String(err)}`);
-        return [] as SdkSessionInfo[];
-      }),
-      readClaudeRegistry(join(this.claudeDir, "sessions"), this.isAlive),
-    ]);
+    let sessions: SdkSessionInfo[];
+    try {
+      sessions = await this.listSessions();
+    } catch (err) {
+      // Rethrow so the daemon keeps the previous Claude sessions.
+      this.log(`claude: listSessions failed: ${String(err)}`);
+      throw err;
+    }
+    const registry = await readClaudeRegistry(join(this.claudeDir, "sessions"), this.isAlive);
     return sessions.map((s) => {
       const live = registry.get(s.sessionId);
       const info: SessionInfo = {
