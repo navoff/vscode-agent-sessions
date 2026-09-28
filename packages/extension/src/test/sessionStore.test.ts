@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionInfo } from "@agent-sessions/core";
 import { SessionMarks, type KeyValueStore } from "../state/marks.js";
-import { SessionStore } from "../state/sessionStore.js";
+import { isSafeSessionId, SessionStore } from "../state/sessionStore.js";
 
 class MemStore implements KeyValueStore {
   data = new Map<string, unknown>();
@@ -53,4 +53,10 @@ test("removeMachine drops rows, find returns session", () => {
   assert.deepEqual(store.machineIds(), ["m"]);
   store.removeMachine("m");
   assert.deepEqual(store.rows("m"), []);
+});
+
+test("isSafeSessionId accepts uuid-like ids only", () => {
+  assert.equal(isSafeSessionId("0199a1b2-c3d4-7e5f-8a9b-0123456789ab"), true);
+  assert.equal(isSafeSessionId("abc_DEF-123"), true);
+  for (const bad of ["", "a b", "a;rm -rf ~", "a\nb", "../x", "a/b"]) assert.equal(isSafeSessionId(bad), false, bad);
 });

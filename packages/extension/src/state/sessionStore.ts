@@ -1,6 +1,11 @@
 import { sessionKey, type SessionInfo } from "@agent-sessions/core";
 import { markKey, type SessionMarks } from "./marks.js";
 
+// Session ids come from files and end up in terminal commands and URIs.
+export function isSafeSessionId(id: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(id);
+}
+
 export interface SessionRow {
   machineId: string;
   session: SessionInfo;

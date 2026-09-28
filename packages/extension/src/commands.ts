@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { AgentKind, SessionInfo } from "@agent-sessions/core";
-import type { SessionStore } from "./state/sessionStore.js";
+import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
 import type { TreeNode } from "./tree/treeModel.js";
 
 export interface FilterState {
@@ -24,6 +24,12 @@ function sessionOf(node: TreeNode | undefined): { machineId: string; session: Se
   return { machineId: node.machineId, session: node.row.session };
 }
 
+function checkSessionId(id: string): boolean {
+  if (isSafeSessionId(id)) return true;
+  void vscode.window.showErrorMessage(`Session id ${JSON.stringify(id.slice(0, 80))} has unexpected characters, ignoring.`);
+  return false;
+}
+
 async function offerInstall(extensionId: string, name: string): Promise<void> {
   const pick = await vscode.window.showErrorMessage(`${name} extension is not installed.`, "Install");
   if (pick === "Install") await vscode.commands.executeCommand("workbench.extensions.installExtension", extensionId);
@@ -34,12 +40,13 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
     void vscode.window.showInformationMessage("Opening remote sessions will come in a later version.");
     return;
   }
+  if (!checkSessionId(session.id)) return;
   if (session.agent === "claude") {
     if (!vscode.extensions.getExtension(CLAUDE_EXTENSION)) return offerInstall(CLAUDE_EXTENSION, "Claude Code");
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
     if (!vscode.extensions.getExtension(CODEX_EXTENSION)) return offerInstall(CODEX_EXTENSION, "Codex");
-    await vscode.env.openExternal(vscode.Uri.parse(`vscode://openai.chatgpt/local/${session.id}`));
+    await vscode.env.openExternal(vscode.Uri.parse(`vscode://openai.chatgpt/local/${encodeURIComponent(session.id)}`));
   } else {
     void vscode.window.showInformationMessage(`Opening ${session.agent} sessions is not supported yet.`);
     return;
@@ -82,11 +89,11 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
   });
   reg("agentSessions.copySessionId", async (node) => {
     const s = sessionOf(node);
-    if (s) await vscode.env.clipboard.writeText(s.session.id);
+    if (s && checkSessionId(s.session.id)) await vscode.env.clipboard.writeText(s.session.id);
   });
   reg("agentSessions.resumeInTerminal", (node) => {
     const s = sessionOf(node);
-    if (!s || s.machineId !== "local") return;
+    if (!s || s.machineId !== "local" || !checkSessionId(s.session.id)) return;
     const cmd = s.session.agent === "claude" ? `claude --resume ${s.session.id}` : `codex resume ${s.session.id}`;
     const term = vscode.window.createTerminal({ name: `${s.session.agent}: ${s.session.title}`, cwd: s.session.cwd || undefined });
     term.show();
