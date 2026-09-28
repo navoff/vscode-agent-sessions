@@ -1,0 +1,28 @@
+{
+  "name": "agent-sessions",
+  "displayName": "Agent Sessions",
+  "description": "Claude Code and Codex sessions from local and remote machines in one view",
+  "version": "0.1.0",
+  "publisher": "postnovvm",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": { "vscode": "^1.96.0" },
+  "categories": ["Other"],
+  "main": "./dist/extension.cjs",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {},
+  "scripts": {
+    "build": "tsc -p . && node esbuild.mjs",
+    "test": "tsc -p . && node --test \"out/test/**/*.test.js\"",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@agent-sessions/core": "*",
+    "@agent-sessions/daemon": "*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.2.1"
+  }
+}
