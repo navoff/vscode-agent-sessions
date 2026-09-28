@@ -37,28 +37,39 @@ function toRecord(raw: unknown): MachineRecord | undefined {
   return rec;
 }
 
-export function parseMachinesFile(text: string): MachinesFile {
+// Returns undefined when the text is not JSON or has no `machines` array.
+export function parseMachinesFileStrict(text: string): MachinesFile | undefined {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
-    return { ...EMPTY, machines: [] };
+    return undefined;
   }
   const list = (raw as { machines?: unknown })?.machines;
-  if (!Array.isArray(list)) return { ...EMPTY, machines: [] };
+  if (!Array.isArray(list)) return undefined;
   return { version: 1, machines: list.map(toRecord).filter((m): m is MachineRecord => m !== undefined) };
+}
+
+export function parseMachinesFile(text: string): MachinesFile {
+  return parseMachinesFileStrict(text) ?? { ...EMPTY, machines: [] };
 }
 
 export function serializeMachinesFile(f: MachinesFile): string {
   return JSON.stringify(f, null, 2) + "\n";
 }
 
-export async function readMachinesFile(path: string): Promise<MachinesFile> {
+// A missing or empty file is an empty list; an unreadable, unparsable or
+// schema-invalid file is undefined so that callers never overwrite it.
+export async function readMachinesFile(path: string): Promise<MachinesFile | undefined> {
+  let text: string;
   try {
-    return parseMachinesFile(await readFile(path, "utf8"));
-  } catch {
-    return { version: 1, machines: [] };
+    text = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, machines: [] };
+    return undefined;
   }
+  if (!text.trim()) return { version: 1, machines: [] };
+  return parseMachinesFileStrict(text);
 }
 
 export async function writeMachinesFile(path: string, f: MachinesFile): Promise<void> {

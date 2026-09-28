@@ -9,7 +9,7 @@ import { spawnLocalDaemon } from "./connection/localConnection.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { registerSessionCommands, type FilterState } from "./commands.js";
-import { parseMachinesFile, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
+import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
 import { SessionMarks } from "./state/marks.js";
@@ -29,8 +29,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const connections = new Map<string, MachineConnection>();
   const daemonPath = context.asAbsolutePath("dist/daemon.mjs");
   const machinesPath = join(context.globalStorageUri.fsPath, "machines.json");
-  let machines: MachinesFile = await readMachinesFile(machinesPath);
-  let lastMachinesText: string | undefined = serializeMachinesFile(machines);
+  const loadedMachines = await readMachinesFile(machinesPath);
+  let machines: MachinesFile = loadedMachines ?? { version: 1, machines: [] };
+  let lastMachinesText: string | undefined = loadedMachines ? serializeMachinesFile(machines) : undefined;
+  // While set, machines.json on disk is invalid and must not be overwritten.
+  let machinesFileBroken = loadedMachines === undefined;
+  const brokenMessage = "machines.json is invalid, fix it by hand; machine commands are disabled until then";
+  if (machinesFileBroken) {
+    appendLog(`[machines] ${machinesPath} is not valid, not reading or writing it until it is fixed`);
+    void vscode.window.showWarningMessage(brokenMessage);
+  }
 
   const cfg = () => vscode.workspace.getConfiguration("agentSessions");
   const sshPath = () => cfg().get<string>("ssh.path", "ssh");
@@ -119,16 +127,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       text = "";
     }
     if (text === lastMachinesText) return;
-    if (text) {
-      try {
-        JSON.parse(text);
-      } catch {
-        appendLog(`[machines] ${machinesPath} is not valid JSON, keeping the previous list`);
-        return;
-      }
+    const parsed = text.trim() ? parseMachinesFileStrict(text) : { version: 1 as const, machines: [] };
+    if (!parsed) {
+      appendLog(`[machines] ${machinesPath} is not valid, keeping the previous list`);
+      return;
     }
-    machines = text ? parseMachinesFile(text) : { version: 1, machines: [] };
+    machines = parsed;
     lastMachinesText = text;
+    if (machinesFileBroken) {
+      machinesFileBroken = false;
+      appendLog(`[machines] ${machinesPath} is valid again`);
+    }
     for (const id of [...connections.keys()]) {
       if (id === LOCAL_ID) continue;
       const m = machines.machines.find((x) => x.id === id);
@@ -189,6 +198,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerMachineCommands(context, {
     current: () => machines,
     save: async (f) => {
+      if (machinesFileBroken) {
+        void vscode.window.showErrorMessage(brokenMessage);
+        throw new Error(brokenMessage);
+      }
       machines = f;
       lastMachinesText = serializeMachinesFile(f);
       await writeMachinesFile(machinesPath, f);

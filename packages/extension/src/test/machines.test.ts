@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, mkdir, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseSshConfigHosts } from "../machines/sshConfig.js";
-import { addMachine, parseMachinesFile, readMachinesFile, removeMachine, serializeMachinesFile, updateMachine, writeMachinesFile } from "../machines/machinesFile.js";
+import { addMachine, parseMachinesFile, parseMachinesFileStrict, readMachinesFile, removeMachine, serializeMachinesFile, updateMachine, writeMachinesFile } from "../machines/machinesFile.js";
 
 test("parseSshConfigHosts returns concrete hosts in order without duplicates", () => {
   const text = `
@@ -57,4 +57,25 @@ test("writeMachinesFile removes its tmp file when the rename fails", async () =>
   await assert.rejects(() => writeMachinesFile(path, f));
   const entries = await readdir(dir);
   assert.deepEqual(entries, ["machines.json"]);
+});
+
+test("parseMachinesFileStrict rejects invalid JSON and a missing machines array", () => {
+  assert.equal(parseMachinesFileStrict("{ nope"), undefined);
+  assert.equal(parseMachinesFileStrict("{}"), undefined);
+  assert.equal(parseMachinesFileStrict('{"machines": 3}'), undefined);
+  assert.deepEqual(parseMachinesFileStrict(JSON.stringify({ version: 1, machines: [{ id: "a", sshHost: "a" }] })), {
+    version: 1,
+    machines: [{ id: "a", name: "a", sshHost: "a", enabled: true, autoConnect: false }],
+  });
+});
+
+test("readMachinesFile tells a missing file from an invalid one", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "machines-"));
+  assert.deepEqual(await readMachinesFile(join(dir, "missing.json")), { version: 1, machines: [] });
+  const bad = join(dir, "bad.json");
+  await writeFile(bad, '{"machines": [ {"id": "a",');
+  assert.equal(await readMachinesFile(bad), undefined);
+  const schema = join(dir, "schema.json");
+  await writeFile(schema, '{"version": 1}');
+  assert.equal(await readMachinesFile(schema), undefined);
 });
