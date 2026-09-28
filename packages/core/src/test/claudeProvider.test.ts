@@ -1,9 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { watch } from "node:fs";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeProvider, type SdkSessionInfo } from "../claude/provider.js";
+
+function inotifyAvailable(dir: string): boolean {
+  try { watch(dir, () => {}).close(); return true; } catch { return false; }
+}
 
 async function makeClaudeDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "claude-"));
@@ -45,8 +50,9 @@ test("snapshot survives an SDK failure", async () => {
   assert.ok(logs.some((l) => l.includes("boom")));
 });
 
-test("watch fires on registry changes", async () => {
+test("watch fires on registry changes", async (t) => {
   const claudeDir = await makeClaudeDir();
+  if (!inotifyAvailable(claudeDir)) { t.skip("inotify instances exhausted on this machine (fs.watch ENOSPC)"); return; }
   const p = new ClaudeProvider({ claudeDir, listSessions: async () => [] });
   let fired = 0;
   const w = p.watch(() => { fired++; });
@@ -69,8 +75,9 @@ test("watch tolerates a missing directory", async () => {
   w?.dispose();
 });
 
-test("watch fires on project file changes", async () => {
+test("watch fires on project file changes", async (t) => {
   const claudeDir = await makeClaudeDir();
+  if (!inotifyAvailable(claudeDir)) { t.skip("inotify instances exhausted on this machine (fs.watch ENOSPC)"); return; }
   const projectDir = join(claudeDir, "projects", "-home-u-proj");
   await mkdir(projectDir);
   const p = new ClaudeProvider({ claudeDir, listSessions: async () => [] });
