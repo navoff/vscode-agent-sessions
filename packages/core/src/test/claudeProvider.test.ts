@@ -55,3 +55,29 @@ test("watch fires on registry changes", async () => {
   w.dispose();
   assert.ok(fired > 0);
 });
+
+test("watch tolerates a missing directory", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "claude-"));
+  await mkdir(join(dir, "sessions"));
+  const logs: string[] = [];
+  const p = new ClaudeProvider({ claudeDir: dir, listSessions: async () => [], log: (m) => logs.push(m) });
+  let w: { dispose: () => void } | undefined;
+  assert.doesNotThrow(() => {
+    w = p.watch(() => {});
+  });
+  assert.ok(logs.some((l) => l.includes("projects")));
+  w?.dispose();
+});
+
+test("watch fires on project file changes", async () => {
+  const claudeDir = await makeClaudeDir();
+  const projectDir = join(claudeDir, "projects", "-home-u-proj");
+  await mkdir(projectDir);
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => [] });
+  let fired = 0;
+  const w = p.watch(() => { fired++; });
+  await writeFile(join(projectDir, "abc.jsonl"), "{}");
+  await new Promise((r) => setTimeout(r, 200));
+  w.dispose();
+  assert.ok(fired > 0);
+});
