@@ -80,3 +80,28 @@ test("stream close fires onClose once", async () => {
   h.client.dispose();
   assert.equal(h.calls.filter((c) => c === "close").length, 1);
 });
+
+test("output stream error is reported and closes once", async () => {
+  const h = harness();
+  h.client.start();
+  h.toDaemon.emit("error", new Error("EPIPE"));
+  await tick(5);
+  assert.ok(h.calls.some((c) => c.startsWith("error:output stream error")));
+  assert.equal(h.calls.filter((c) => c === "close").length, 1);
+});
+
+test("dispose while the stream is alive closes the readline and stops pings", async () => {
+  const h = harness();
+  h.client.start();
+  h.fromDaemon.write(hello);
+  await tick(5);
+  h.client.dispose();
+  const sentCount = h.sentToDaemon.length;
+  await tick(60);
+  assert.equal(h.sentToDaemon.length, sentCount);
+  assert.equal(h.calls.filter((c) => c === "close").length, 1);
+  const callsCount = h.calls.length;
+  h.fromDaemon.write('{"type":"snapshot","sessions":[]}\n');
+  await tick(5);
+  assert.equal(h.calls.length, callsCount);
+});

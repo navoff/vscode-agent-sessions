@@ -1,4 +1,4 @@
-import { createInterface } from "node:readline";
+import { createInterface, type Interface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { SessionInfo } from "@agent-sessions/core";
 import { parseDaemonMessage, PROTOCOL_VERSION, type ClientMessage, type HelloInfo } from "@agent-sessions/daemon";
@@ -19,15 +19,18 @@ export interface LineClientOptions {
 
 export class LineClient {
   private closed = false;
+  private readonly rl: Interface;
   private helloTimer: NodeJS.Timeout | undefined;
   private pingTimer: NodeJS.Timeout | undefined;
   private pongTimer: NodeJS.Timeout | undefined;
   private readonly pingIntervalMs: number;
   private readonly pongTimeoutMs: number;
   private readonly helloTimeoutMs: number;
+  private readonly onInputError = (err: unknown) => this.fail(`input stream error: ${String(err)}`);
+  private readonly onOutputError = (err: unknown) => this.fail(`output stream error: ${String(err)}`);
 
   constructor(
-    input: Readable,
+    private readonly input: Readable,
     private readonly output: Writable,
     private readonly events: LineClientEvents,
     opts: LineClientOptions = {},
@@ -35,9 +38,11 @@ export class LineClient {
     this.pingIntervalMs = opts.pingIntervalMs ?? 10_000;
     this.pongTimeoutMs = opts.pongTimeoutMs ?? 10_000;
     this.helloTimeoutMs = opts.helloTimeoutMs ?? 15_000;
-    const rl = createInterface({ input });
-    rl.on("line", (line) => this.onLine(line));
-    rl.on("close", () => this.close());
+    this.input.on("error", this.onInputError);
+    this.output.on("error", this.onOutputError);
+    this.rl = createInterface({ input: this.input });
+    this.rl.on("line", (line) => this.onLine(line));
+    this.rl.on("close", () => this.close());
   }
 
   start(): void {
@@ -108,6 +113,9 @@ export class LineClient {
     if (this.helloTimer) clearTimeout(this.helloTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.pongTimer) clearTimeout(this.pongTimer);
+    this.input.off("error", this.onInputError);
+    this.output.off("error", this.onOutputError);
+    this.rl.close();
     this.events.onClose();
   }
 }
