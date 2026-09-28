@@ -60,7 +60,7 @@
       ],
       "view/item/context": [
         { "command": "agentSessions.openSession", "when": "view == agentSessions.view && viewItem =~ /^session:local/", "group": "1_open@1" },
-        { "command": "agentSessions.resumeInTerminal", "when": "view == agentSessions.view && viewItem =~ /^session:local/", "group": "1_open@2" },
+        { "command": "agentSessions.resumeInTerminal", "when": "view == agentSessions.view && viewItem =~ /^session:local:(claude|codex):/", "group": "1_open@2" },
         { "command": "agentSessions.markRead", "when": "view == agentSessions.view && viewItem =~ /^session:.*:unread$/", "group": "2_marks@1" },
         { "command": "agentSessions.markUnread", "when": "view == agentSessions.view && viewItem =~ /^session:.*:read$/", "group": "2_marks@2" },
         { "command": "agentSessions.hideSession", "when": "view == agentSessions.view && viewItem =~ /^session:.*:visible:/", "group": "2_marks@3" },

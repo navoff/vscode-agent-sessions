@@ -14,6 +14,7 @@ export function createSshRunner(sshPath: string, log: (line: string) => void): S
         child.stderr.on("data", (d) => (stderr += d));
         child.on("error", (err) => resolve({ code: 255, stdout, stderr: `${stderr}${String(err)}` }));
         child.on("close", (code) => resolve({ code: code ?? 255, stdout, stderr }));
+        child.stdin.on("error", () => {});
         child.stdin.end(stdin ?? "");
       });
     },

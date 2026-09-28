@@ -20,6 +20,10 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this.emitter.fire(undefined);
   }
 
+  dispose(): void {
+    this.emitter.dispose();
+  }
+
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
       const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);

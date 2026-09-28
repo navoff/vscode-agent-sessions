@@ -9,7 +9,7 @@ import { spawnLocalDaemon } from "./connection/localConnection.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { registerSessionCommands, type FilterState } from "./commands.js";
-import { readMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
+import { parseMachinesFile, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
 import { SessionMarks } from "./state/marks.js";
@@ -30,6 +30,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const daemonPath = context.asAbsolutePath("dist/daemon.mjs");
   const machinesPath = join(context.globalStorageUri.fsPath, "machines.json");
   let machines: MachinesFile = await readMachinesFile(machinesPath);
+  let lastMachinesText: string | undefined = serializeMachinesFile(machines);
 
   const cfg = () => vscode.workspace.getConfiguration("agentSessions");
   const sshPath = () => cfg().get<string>("ssh.path", "ssh");
@@ -54,7 +55,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.Uri.joinPath(context.extensionUri, "resources"),
     homedir(),
   );
-  context.subscriptions.push(vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true }));
+  context.subscriptions.push(tree, vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true }));
   const refresh = () => tree.refresh();
 
   const makeConnection = (id: string): MachineConnection | undefined => {
@@ -64,9 +65,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (id === LOCAL_ID) {
       factory = () => spawnLocalDaemon(daemonPath, appendLog);
     } else {
-      const m = machines.machines.find((x) => x.id === id);
-      if (!m) return undefined;
+      if (!machines.machines.some((x) => x.id === id)) return undefined;
       factory = () => {
+        const m = machines.machines.find((x) => x.id === id);
+        if (!m) throw new Error("machine removed");
         if (!m.remoteNode || !m.remoteHome) throw new Error("machine is not prepared, run Prepare Machine");
         return spawnSshDaemon(sshPath(), m.sshHost, m.remoteNode, remoteDaemonPath(m.remoteHome), appendLog);
       };
@@ -98,22 +100,67 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     makeConnection(id)?.connect();
   };
-  const disconnect = (id: string) => {
-    connections.get(id)?.disconnect();
+  const dropConnection = (id: string) => {
+    connections.get(id)?.dispose();
+    connections.delete(id);
     store.removeMachine(id);
+  };
+  const disconnect = (id: string) => {
+    dropConnection(id);
     refresh();
   };
 
-  const reloadMachines = async () => {
-    machines = await readMachinesFile(machinesPath);
-    for (const [id, conn] of connections) {
-      if (id !== LOCAL_ID && !machines.machines.some((m) => m.id === id)) {
-        conn.dispose();
-        connections.delete(id);
-        store.removeMachine(id);
+  const reloadMachinesOnce = async () => {
+    let text: string;
+    try {
+      text = await readFile(machinesPath, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      text = "";
+    }
+    if (text === lastMachinesText) return;
+    if (text) {
+      try {
+        JSON.parse(text);
+      } catch {
+        appendLog(`[machines] ${machinesPath} is not valid JSON, keeping the previous list`);
+        return;
       }
     }
+    machines = text ? parseMachinesFile(text) : { version: 1, machines: [] };
+    lastMachinesText = text;
+    for (const id of [...connections.keys()]) {
+      if (id === LOCAL_ID) continue;
+      const m = machines.machines.find((x) => x.id === id);
+      if (!m || !m.enabled) dropConnection(id);
+    }
     refresh();
+  };
+
+  let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+  let reloading = false;
+  let reloadPending = false;
+  const reloadMachines = async (): Promise<void> => {
+    if (reloading) {
+      reloadPending = true;
+      return;
+    }
+    reloading = true;
+    try {
+      do {
+        reloadPending = false;
+        await reloadMachinesOnce();
+      } while (reloadPending);
+    } finally {
+      reloading = false;
+    }
+  };
+  const scheduleReload = () => {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      reloadTimer = undefined;
+      reloadMachines().catch((err) => appendLog(`[machines] reload failed: ${String(err)}`));
+    }, 200);
   };
 
   let machinesWatcher: FSWatcher | undefined;
@@ -121,7 +168,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     machinesWatcher?.close();
     try {
       machinesWatcher = watch(join(context.globalStorageUri.fsPath), (_e, name) => {
-        if (name === "machines.json") void reloadMachines();
+        if (name === "machines.json") scheduleReload();
       });
     } catch {
       machinesWatcher = undefined;
@@ -143,6 +190,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     current: () => machines,
     save: async (f) => {
       machines = f;
+      lastMachinesText = serializeMachinesFile(f);
       await writeMachinesFile(machinesPath, f);
       watchMachinesFile();
       refresh();
@@ -158,7 +206,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("agentSessions")) refresh();
     }),
-    { dispose: () => { machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
+    { dispose: () => { if (reloadTimer) clearTimeout(reloadTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
   );
 
   await vscode.workspace.fs.createDirectory(context.globalStorageUri);
