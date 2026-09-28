@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import type { SessionInfo } from "@agent-sessions/core";
-import { MachineConnection, type DaemonProcess, type MachineState } from "../connection/machineConnection.js";
+import { MachineConnection, createStderrTail, type DaemonProcess, type MachineState } from "../connection/machineConnection.js";
 
 const hello = '{"type":"hello","protocol":1,"daemonVersion":"9","agents":["claude"],"home":"/h"}\n';
 const s = (id: string): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle" });
@@ -85,4 +85,29 @@ test("factory failure is reported as error", async () => {
   await tick(5);
   assert.equal(conn.state, "error");
   assert.match(conn.error ?? "", /no ssh/);
+});
+
+test("exit error includes the last stderr lines of the process", async () => {
+  const procs: FakeProc[] = [];
+  const conn = new MachineConnection("m1", () => {
+    const p = new FakeProc();
+    (p as DaemonProcess).lastStderr = () => "Permission denied (publickey)";
+    procs.push(p);
+    return p;
+  }, { onStateChange: () => {}, onSessions: () => {} }, { autoReconnect: false, clientOptions: { pingIntervalMs: 1000, pongTimeoutMs: 1000, helloTimeoutMs: 1000 } });
+  conn.connect();
+  await tick(5);
+  procs[0].exit(255);
+  await tick(5);
+  assert.equal(conn.state, "error");
+  assert.equal(conn.error, "daemon exited with code 255: Permission denied (publickey)");
+  conn.dispose();
+});
+
+test("createStderrTail keeps the last five lines", () => {
+  const t = createStderrTail();
+  t.push("one\ntwo\n");
+  t.push("\nthree\nfour\nfi");
+  t.push("ve\nsix\nseven");
+  assert.equal(t.text(), "three | four | five | six | seven");
 });

@@ -9,6 +9,26 @@ export interface DaemonProcess {
   stdout: Readable;
   kill(): void;
   onExit(cb: (code: number | null) => void): void;
+  /** The last few stderr lines, joined by " | ", if the process keeps them. */
+  lastStderr?(): string;
+}
+
+/** Keeps the last `max` non-empty lines written to a stderr stream. */
+export function createStderrTail(max = 5): { push(chunk: string | Buffer): void; text(): string } {
+  const lines: string[] = [];
+  let partial = "";
+  return {
+    push(chunk) {
+      const parts = (partial + String(chunk)).split("\n");
+      partial = parts.pop() ?? "";
+      for (const l of parts) if (l.trim()) lines.push(l.trim());
+      lines.splice(0, Math.max(0, lines.length - max));
+    },
+    text() {
+      const all = partial.trim() ? [...lines, partial.trim()].slice(-max) : lines;
+      return all.join(" | ");
+    },
+  };
 }
 
 export type ProcessFactory = () => DaemonProcess;
@@ -77,7 +97,8 @@ export class MachineConnection {
     this.proc = proc;
     proc.onExit((code) => {
       if (this.proc !== proc) return;
-      this.onFailure(`daemon exited with code ${code ?? "null"}`);
+      const stderr = proc.lastStderr?.();
+      this.onFailure(`daemon exited with code ${code ?? "null"}${stderr ? `: ${stderr}` : ""}`);
     });
     this.client = new LineClient(
       proc.stdout,
