@@ -77,3 +77,28 @@ test("readRolloutInfo skips title and tail for service threads", async () => {
   assert.equal(info?.meta.isUserThread, false);
   assert.equal(info?.title, undefined);
 });
+
+const filler = () => JSON.stringify({ type: "response_item", payload: { type: "reasoning", text: "x".repeat(600) } });
+
+async function writeRollout(lines: string[]): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "codex-"));
+  const file = join(dir, "rollout-long.jsonl");
+  await writeFile(file, lines.join("\n") + "\n");
+  return file;
+}
+
+test("readRolloutInfo finds task_started more than 64 KB before the end", async () => {
+  const head = [meta({ id: "u1", cwd: "/w", thread_source: "user" }), userMsg("long turn"), event("task_complete"), event("task_started")];
+  const file = await writeRollout([...head, ...Array.from({ length: 200 }, filler)]);
+  const size = (await stat(file)).size;
+  assert.ok(size > 128 * 1024);
+  const info = await readRolloutInfo(file, size);
+  assert.equal(info?.status, "running");
+});
+
+test("readRolloutInfo sees task_complete that follows a long turn", async () => {
+  const head = [meta({ id: "u1", cwd: "/w", thread_source: "user" }), userMsg("long turn"), event("task_started")];
+  const file = await writeRollout([...head, ...Array.from({ length: 200 }, filler), event("task_complete"), ...Array.from({ length: 200 }, filler)]);
+  const info = await readRolloutInfo(file, (await stat(file)).size);
+  assert.equal(info?.status, "idle");
+});

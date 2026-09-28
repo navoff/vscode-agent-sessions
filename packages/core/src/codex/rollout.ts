@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises";
+import { open, type FileHandle } from "node:fs/promises";
 import type { SessionStatus } from "../types.js";
 
 export interface CodexRolloutMeta {
@@ -15,7 +15,8 @@ export interface CodexRolloutInfo {
 }
 
 const HEAD_BYTES = 2 * 1024 * 1024;
-const TAIL_BYTES = 64 * 1024;
+const TAIL_CHUNK_BYTES = 64 * 1024;
+const TAIL_MAX_BYTES = 8 * 1024 * 1024;
 const TITLE_MAX = 80;
 
 // Ported from Codex History Viewer (MIT, (c) 2026 HizTam): service rollouts
@@ -80,14 +81,50 @@ export function extractFirstPrompt(lines: Iterable<string>): string | undefined 
 
 const STATUS_EVENT = /"type":"(task_started|task_complete|turn_aborted)"/;
 
-export function statusFromTail(tail: string): SessionStatus {
+function lastStatusEvent(text: string): string | undefined {
   let last: string | undefined;
-  for (const line of tail.split("\n")) {
+  for (const line of text.split("\n")) {
     if (!line.includes('"event_msg"')) continue;
     const m = STATUS_EVENT.exec(line);
     if (m) last = m[1];
   }
-  return last === "task_started" ? "running" : "idle";
+  return last;
+}
+
+export function statusFromTail(tail: string): SessionStatus {
+  return lastStatusEvent(tail) === "task_started" ? "running" : "idle";
+}
+
+// Reads the file backwards in 64 KB chunks until a chunk holds a task event.
+// The partial first line of each chunk is carried over to the next (earlier)
+// chunk. The scan stops after TAIL_MAX_BYTES to bound the cost on huge files.
+export async function readStatusBackwards(fh: FileHandle, size: number): Promise<SessionStatus> {
+  const limit = Math.max(0, size - TAIL_MAX_BYTES);
+  let end = size;
+  let carry = Buffer.alloc(0);
+  while (end > limit) {
+    const start = Math.max(limit, end - TAIL_CHUNK_BYTES);
+    const chunk = Buffer.alloc(end - start);
+    await fh.read(chunk, 0, chunk.length, start);
+    end = start;
+    const buf = carry.length ? Buffer.concat([chunk, carry]) : chunk;
+    let complete: Buffer;
+    if (start === 0) {
+      complete = buf;
+      carry = Buffer.alloc(0);
+    } else {
+      const nl = buf.indexOf(0x0a);
+      if (nl === -1) {
+        carry = buf;
+        continue;
+      }
+      carry = buf.subarray(0, nl);
+      complete = buf.subarray(nl + 1);
+    }
+    const last = lastStatusEvent(complete.toString("utf8"));
+    if (last) return last === "task_started" ? "running" : "idle";
+  }
+  return "idle";
 }
 
 export async function readRolloutInfo(filePath: string, size: number): Promise<CodexRolloutInfo | undefined> {
@@ -104,11 +141,7 @@ export async function readRolloutInfo(filePath: string, size: number): Promise<C
     const headLines = headText.split("\n");
     if (headLen < size) headLines.pop();
     const title = extractFirstPrompt(headLines);
-    const tailStart = Math.max(0, size - TAIL_BYTES);
-    const tailLen = size - tailStart;
-    const tail = Buffer.alloc(tailLen);
-    await fh.read(tail, 0, tailLen, tailStart);
-    return { meta, title, status: statusFromTail(tail.toString("utf8")) };
+    return { meta, title, status: await readStatusBackwards(fh, size) };
   } finally {
     await fh.close();
   }
