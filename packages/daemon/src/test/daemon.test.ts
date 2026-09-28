@@ -57,6 +57,17 @@ test("hello with wrong protocol yields error", () => {
   daemon.stop();
 });
 
+test("stop calls onStop once, after a protocol mismatch too", () => {
+  let stops = 0;
+  const sent: DaemonMessage[] = [];
+  const daemon = new Daemon({ providers: [], send: (m) => sent.push(m), version: "t", home: "/h", onStop: () => stops++ });
+  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION + 1 });
+  assert.equal(sent[0].type, "error");
+  assert.equal(stops, 1);
+  daemon.stop();
+  assert.equal(stops, 1);
+});
+
 test("hello then snapshot returns full list", async () => {
   const { sent, claude, daemon } = setup();
   claude.sessions = [s("claude", "a")];

@@ -8,15 +8,25 @@ import { fileURLToPath } from "node:url";
 
 const bundle = join(dirname(fileURLToPath(import.meta.url)), "..", "daemon.mjs");
 
-function run(args: string[], env: Record<string, string>, input?: string): Promise<{ code: number | null; out: string; err: string }> {
+function run(args: string[], env: Record<string, string>, input?: string, keepStdinOpen = false): Promise<{ code: number | null; out: string; err: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [bundle, ...args], { env: { ...process.env, ...env } });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
-    child.on("close", (code) => resolve({ code, out, err }));
-    if (input !== undefined) child.stdin.end(input);
+    // With stdin kept open the daemon must exit by itself; kill it after 3 s
+    // so a regression fails the test instead of hanging the runner.
+    const killer = keepStdinOpen ? setTimeout(() => child.kill(), 3000) : undefined;
+    child.on("close", (code) => {
+      if (killer) clearTimeout(killer);
+      resolve({ code, out, err });
+    });
+    child.stdin.on("error", () => {});
+    if (input !== undefined) {
+      if (keepStdinOpen) child.stdin.write(input);
+      else child.stdin.end(input);
+    }
   });
 }
 
@@ -43,11 +53,11 @@ test("stdio session answers hello and snapshot, exits on stdin close", async () 
   assert.equal(r.code, 0);
 });
 
-test("protocol mismatch answers error and exits promptly", async () => {
+test("protocol mismatch answers error and exits promptly with stdin still open", async () => {
   const home = await mkdtemp(join(tmpdir(), "home-"));
   const start = Date.now();
   const r = await run(["--stdio"], { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") },
-    '{"type":"hello","protocol":99}\n{"type":"ping"}\n');
+    '{"type":"hello","protocol":99}\n{"type":"ping"}\n', true);
   const elapsed = Date.now() - start;
   const lines = r.out.trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(lines[0].type, "error");

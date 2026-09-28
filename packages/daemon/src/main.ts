@@ -29,7 +29,15 @@ export function main(argv: string[]): void {
   const send = (m: DaemonMessage) => {
     process.stdout.write(JSON.stringify(m) + "\n");
   };
-  const daemon = new Daemon({ providers, send, version: VERSION, home, log });
+  let exiting = false;
+  const exit = () => {
+    if (exiting) return;
+    exiting = true;
+    process.exit(0);
+  };
+  // stop() also runs on a protocol mismatch; exit on the next turn so the
+  // error reply written just before is flushed.
+  const daemon = new Daemon({ providers, send, version: VERSION, home, log, onStop: () => setImmediate(exit) });
   const rl = createInterface({ input: process.stdin });
   rl.on("line", (line) => {
     if (!line.trim()) return;
@@ -43,7 +51,7 @@ export function main(argv: string[]): void {
   rl.on("close", () => {
     void Promise.race([daemon.drain(), new Promise<void>((r) => setTimeout(r, EXIT_GRACE_MS).unref())]).then(() => {
       daemon.stop();
-      process.exit(0);
+      exit();
     });
   });
 }

@@ -9,6 +9,8 @@ export interface DaemonOptions {
   debounceMs?: number;
   pollMs?: number;
   log?: (msg: string) => void;
+  /** Called once, at the end of the first stop(). */
+  onStop?: () => void;
 }
 
 export function sameSession(a: SessionInfo, b: SessionInfo): boolean {
@@ -71,11 +73,13 @@ export class Daemon {
   }
 
   stop(): void {
+    const first = !this.stopped;
     this.stopped = true;
     for (const w of this.watchers) w.dispose();
     this.watchers = [];
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.pollTimer) clearInterval(this.pollTimer);
+    if (first) this.opts.onStop?.();
   }
 
   private ensureStarted(): void {
