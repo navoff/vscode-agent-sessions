@@ -42,6 +42,22 @@ export function parseClientMessage(line: string): ClientMessage | undefined {
   }
 }
 
+const STATUSES = new Set<unknown>(["running", "idle", "unknown"]);
+
+function isSessionInfo(v: unknown): v is SessionInfo {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return (
+    typeof s.agent === "string" &&
+    typeof s.id === "string" &&
+    typeof s.title === "string" &&
+    typeof s.cwd === "string" &&
+    typeof s.createdAt === "number" &&
+    typeof s.updatedAt === "number" &&
+    STATUSES.has(s.status)
+  );
+}
+
 export function parseDaemonMessage(line: string): DaemonMessage | undefined {
   let raw: unknown;
   try {
@@ -57,10 +73,10 @@ export function parseDaemonMessage(line: string): DaemonMessage | undefined {
         ? { type: "hello", protocol: r.protocol, daemonVersion: r.daemonVersion, agents: r.agents as AgentKind[], home: r.home }
         : undefined;
     case "snapshot":
-      return Array.isArray(r.sessions) ? { type: "snapshot", sessions: r.sessions as SessionInfo[] } : undefined;
+      return Array.isArray(r.sessions) ? { type: "snapshot", sessions: r.sessions.filter(isSessionInfo) } : undefined;
     case "changed":
       return Array.isArray(r.upserted) && Array.isArray(r.removed)
-        ? { type: "changed", upserted: r.upserted as SessionInfo[], removed: r.removed as string[] }
+        ? { type: "changed", upserted: r.upserted.filter(isSessionInfo), removed: r.removed.filter((k): k is string => typeof k === "string") }
         : undefined;
     case "pong":
       return { type: "pong" };

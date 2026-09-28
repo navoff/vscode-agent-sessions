@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionInfo, SessionProvider } from "@agent-sessions/core";
 import { Daemon, sameSession } from "../daemon.js";
-import { parseClientMessage, PROTOCOL_VERSION, type DaemonMessage } from "../protocol.js";
+import { parseClientMessage, parseDaemonMessage, PROTOCOL_VERSION, type DaemonMessage } from "../protocol.js";
 
 class FakeProvider implements SessionProvider {
   sessions: SessionInfo[] = [];
@@ -166,4 +166,15 @@ test("sameSession compares the fields that matter", () => {
   assert.ok(sameSession(s("claude", "a"), s("claude", "a")));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { status: "running" })));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { live: { pid: 1, statusUpdatedAt: 2 } })));
+});
+
+test("parseDaemonMessage drops malformed sessions and removed keys", () => {
+  const good: SessionInfo = { agent: "claude", id: "a", title: "t", cwd: "/w", createdAt: 1, updatedAt: 2, status: "idle" };
+  const bad = { ...good, id: 5, status: "weird" };
+  assert.deepEqual(parseDaemonMessage(JSON.stringify({ type: "snapshot", sessions: [null, bad, good] })), { type: "snapshot", sessions: [good] });
+  assert.deepEqual(parseDaemonMessage(JSON.stringify({ type: "changed", upserted: [good, { ...good, updatedAt: "2" }], removed: ["claude:a", null, 3] })), {
+    type: "changed",
+    upserted: [good],
+    removed: ["claude:a"],
+  });
 });
