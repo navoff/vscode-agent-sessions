@@ -11,11 +11,89 @@
   "categories": ["Other"],
   "main": "./dist/extension.cjs",
   "activationEvents": ["onStartupFinished"],
-  "contributes": {},
   "scripts": {
-    "build": "tsc -p . && node esbuild.mjs",
+    "build": "tsc -p . && node scripts/gen-icons.mjs && node esbuild.mjs",
     "test": "tsc -p . && node --test \"out/test/**/*.test.js\"",
     "package": "npm run build && vsce package --no-dependencies"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "agentSessions", "title": "Agent Sessions", "icon": "resources/view-icon.svg" }
+      ]
+    },
+    "views": {
+      "agentSessions": [
+        { "id": "agentSessions.view", "name": "Sessions", "icon": "resources/view-icon.svg" }
+      ]
+    },
+    "commands": [
+      { "command": "agentSessions.refresh", "title": "Refresh", "category": "Agent Sessions", "icon": "$(refresh)" },
+      { "command": "agentSessions.openSession", "title": "Open Session", "category": "Agent Sessions" },
+      { "command": "agentSessions.markRead", "title": "Mark as Read", "category": "Agent Sessions" },
+      { "command": "agentSessions.markUnread", "title": "Mark as Unread", "category": "Agent Sessions" },
+      { "command": "agentSessions.hideSession", "title": "Hide Session", "category": "Agent Sessions" },
+      { "command": "agentSessions.unhideSession", "title": "Unhide Session", "category": "Agent Sessions" },
+      { "command": "agentSessions.copySessionId", "title": "Copy Session ID", "category": "Agent Sessions" },
+      { "command": "agentSessions.resumeInTerminal", "title": "Resume in Terminal", "category": "Agent Sessions" },
+      { "command": "agentSessions.toggleRemote", "title": "Show/Hide Remote Sessions", "category": "Agent Sessions", "icon": "$(remote)" },
+      { "command": "agentSessions.toggleHidden", "title": "Show/Hide Hidden Sessions", "category": "Agent Sessions", "icon": "$(eye)" },
+      { "command": "agentSessions.filterAgents", "title": "Filter by Agent", "category": "Agent Sessions", "icon": "$(filter)" },
+      { "command": "agentSessions.addMachine", "title": "Add Machine", "category": "Agent Sessions", "icon": "$(add)" },
+      { "command": "agentSessions.renameMachine", "title": "Rename Machine", "category": "Agent Sessions" },
+      { "command": "agentSessions.removeMachine", "title": "Remove Machine", "category": "Agent Sessions" },
+      { "command": "agentSessions.enableMachine", "title": "Enable Machine", "category": "Agent Sessions" },
+      { "command": "agentSessions.disableMachine", "title": "Disable Machine", "category": "Agent Sessions" },
+      { "command": "agentSessions.prepareMachine", "title": "Prepare Machine", "category": "Agent Sessions" },
+      { "command": "agentSessions.connectMachine", "title": "Connect", "category": "Agent Sessions", "icon": "$(plug)" },
+      { "command": "agentSessions.disconnectMachine", "title": "Disconnect", "category": "Agent Sessions", "icon": "$(debug-disconnect)" },
+      { "command": "agentSessions.showLog", "title": "Show Log", "category": "Agent Sessions" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "agentSessions.addMachine", "when": "view == agentSessions.view", "group": "navigation@1" },
+        { "command": "agentSessions.filterAgents", "when": "view == agentSessions.view", "group": "navigation@2" },
+        { "command": "agentSessions.toggleRemote", "when": "view == agentSessions.view", "group": "navigation@3" },
+        { "command": "agentSessions.toggleHidden", "when": "view == agentSessions.view", "group": "navigation@4" },
+        { "command": "agentSessions.refresh", "when": "view == agentSessions.view", "group": "navigation@5" },
+        { "command": "agentSessions.showLog", "when": "view == agentSessions.view", "group": "z_misc" }
+      ],
+      "view/item/context": [
+        { "command": "agentSessions.openSession", "when": "view == agentSessions.view && viewItem =~ /^session:local/", "group": "1_open@1" },
+        { "command": "agentSessions.resumeInTerminal", "when": "view == agentSessions.view && viewItem =~ /^session:local/", "group": "1_open@2" },
+        { "command": "agentSessions.markRead", "when": "view == agentSessions.view && viewItem =~ /^session:.*:unread$/", "group": "2_marks@1" },
+        { "command": "agentSessions.markUnread", "when": "view == agentSessions.view && viewItem =~ /^session:.*:read$/", "group": "2_marks@2" },
+        { "command": "agentSessions.hideSession", "when": "view == agentSessions.view && viewItem =~ /^session:.*:visible:/", "group": "2_marks@3" },
+        { "command": "agentSessions.unhideSession", "when": "view == agentSessions.view && viewItem =~ /^session:.*:hidden:/", "group": "2_marks@4" },
+        { "command": "agentSessions.copySessionId", "when": "view == agentSessions.view && viewItem =~ /^session:/", "group": "3_misc@1" },
+        { "command": "agentSessions.connectMachine", "when": "view == agentSessions.view && viewItem =~ /^machine:.*:(disconnected|error)$/", "group": "inline@1" },
+        { "command": "agentSessions.disconnectMachine", "when": "view == agentSessions.view && viewItem =~ /^machine:.*:(connected|connecting)$/", "group": "inline@1" },
+        { "command": "agentSessions.prepareMachine", "when": "view == agentSessions.view && viewItem =~ /^machine:remote/", "group": "1_machine@1" },
+        { "command": "agentSessions.renameMachine", "when": "view == agentSessions.view && viewItem =~ /^machine:remote/", "group": "1_machine@2" },
+        { "command": "agentSessions.enableMachine", "when": "view == agentSessions.view && viewItem =~ /^machine:remote:disabled/", "group": "1_machine@3" },
+        { "command": "agentSessions.disableMachine", "when": "view == agentSessions.view && viewItem =~ /^machine:remote:enabled/", "group": "1_machine@3" },
+        { "command": "agentSessions.removeMachine", "when": "view == agentSessions.view && viewItem =~ /^machine:remote/", "group": "1_machine@9" }
+      ],
+      "commandPalette": [
+        { "command": "agentSessions.openSession", "when": "false" },
+        { "command": "agentSessions.markRead", "when": "false" },
+        { "command": "agentSessions.markUnread", "when": "false" },
+        { "command": "agentSessions.hideSession", "when": "false" },
+        { "command": "agentSessions.unhideSession", "when": "false" },
+        { "command": "agentSessions.copySessionId", "when": "false" },
+        { "command": "agentSessions.resumeInTerminal", "when": "false" },
+        { "command": "agentSessions.connectMachine", "when": "false" },
+        { "command": "agentSessions.disconnectMachine", "when": "false" }
+      ]
+    },
+    "configuration": {
+      "title": "Agent Sessions",
+      "properties": {
+        "agentSessions.autoConnectOnStartup": { "type": "boolean", "default": true, "description": "Connect the local machine and machines marked autoConnect when VS Code starts." },
+        "agentSessions.ssh.path": { "type": "string", "default": "ssh", "description": "Path to the ssh binary used for remote machines." },
+        "agentSessions.showHidden": { "type": "boolean", "default": false, "description": "Show hidden sessions in the tree." }
+      }
+    }
   },
   "dependencies": {
     "@agent-sessions/core": "*",

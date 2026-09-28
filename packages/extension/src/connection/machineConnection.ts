@@ -30,6 +30,7 @@ export class MachineConnection {
   state: MachineState = "disconnected";
   error: string | undefined;
   daemonVersion: string | undefined;
+  home: string | undefined;
   sessions = new Map<string, SessionInfo>();
   private client: LineClient | undefined;
   private proc: DaemonProcess | undefined;
@@ -85,6 +86,7 @@ export class MachineConnection {
         onHello: (info) => {
           this.attempt = 0;
           this.daemonVersion = info.daemonVersion;
+          this.home = info.home;
           this.setState("connected");
         },
         onSnapshot: (list) => {

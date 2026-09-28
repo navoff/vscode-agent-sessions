@@ -10,6 +10,7 @@ export interface MachineRecord {
   autoConnect: boolean;
   remoteNode?: string;
   daemonVersion?: string;
+  remoteHome?: string;
 }
 
 export interface MachinesFile {
@@ -32,6 +33,7 @@ function toRecord(raw: unknown): MachineRecord | undefined {
   };
   if (typeof r.remoteNode === "string") rec.remoteNode = r.remoteNode;
   if (typeof r.daemonVersion === "string") rec.daemonVersion = r.daemonVersion;
+  if (typeof r.remoteHome === "string") rec.remoteHome = r.remoteHome;
   return rec;
 }
 
