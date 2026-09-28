@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 
 export interface MachineRecord {
   id: string;
@@ -60,9 +61,14 @@ export async function readMachinesFile(path: string): Promise<MachinesFile> {
 
 export async function writeMachinesFile(path: string, f: MachinesFile): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.tmp`;
-  await writeFile(tmp, serializeMachinesFile(f), "utf8");
-  await rename(tmp, path);
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, serializeMachinesFile(f), "utf8");
+    await rename(tmp, path);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    throw err;
+  }
 }
 
 export function addMachine(f: MachinesFile, sshHost: string, name?: string): MachinesFile {

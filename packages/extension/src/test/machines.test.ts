@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseSshConfigHosts } from "../machines/sshConfig.js";
@@ -47,4 +47,14 @@ test("write then read round-trips and creates directories", async () => {
   assert.deepEqual(await readMachinesFile(path), f);
   assert.equal(await readFile(path, "utf8"), serializeMachinesFile(f));
   assert.deepEqual(await readMachinesFile(join(dir, "missing.json")), { version: 1, machines: [] });
+});
+
+test("writeMachinesFile removes its tmp file when the rename fails", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "machines-"));
+  const path = join(dir, "machines.json");
+  await mkdir(path);
+  const f = addMachine(parseMachinesFile(""), "hz");
+  await assert.rejects(() => writeMachinesFile(path, f));
+  const entries = await readdir(dir);
+  assert.deepEqual(entries, ["machines.json"]);
 });
