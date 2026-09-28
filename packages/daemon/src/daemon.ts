@@ -29,7 +29,8 @@ export class Daemon {
   private debounceTimer: NodeJS.Timeout | undefined;
   private pollTimer: NodeJS.Timeout | undefined;
   private refreshing = false;
-  private pending = false;
+  private pendingFull = false;
+  private pendingIncremental = false;
   private started = false;
   private stopped = false;
   private readonly debounceMs: number;
@@ -43,6 +44,7 @@ export class Daemon {
   }
 
   handle(msg: ClientMessage): void {
+    if (this.stopped) return;
     switch (msg.type) {
       case "hello":
         if (msg.protocol !== PROTOCOL_VERSION) {
@@ -105,9 +107,11 @@ export class Daemon {
   }
 
   private async refresh(full: boolean): Promise<void> {
+    if (this.stopped) return;
     this.ensureStarted();
     if (this.refreshing) {
-      this.pending = true;
+      if (full) this.pendingFull ||= full;
+      else this.pendingIncremental = true;
       return;
     }
     this.refreshing = true;
@@ -130,8 +134,11 @@ export class Daemon {
       if (upserted.length > 0 || removed.length > 0) this.opts.send({ type: "changed", upserted, removed });
     } finally {
       this.refreshing = false;
-      if (this.pending) {
-        this.pending = false;
+      if (this.pendingFull) {
+        this.pendingFull = this.pendingIncremental = false;
+        void this.refresh(true);
+      } else if (this.pendingIncremental) {
+        this.pendingIncremental = false;
         this.schedule();
       }
     }

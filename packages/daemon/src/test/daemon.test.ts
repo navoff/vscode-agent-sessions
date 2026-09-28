@@ -7,9 +7,13 @@ import { parseClientMessage, PROTOCOL_VERSION, type DaemonMessage } from "../pro
 class FakeProvider implements SessionProvider {
   sessions: SessionInfo[] = [];
   fail = false;
+  gate: Promise<void> | undefined;
+  snapshotCalls = 0;
   private cb: (() => void) | undefined;
   constructor(readonly agent: "claude" | "codex") {}
   async snapshot(): Promise<SessionInfo[]> {
+    this.snapshotCalls++;
+    if (this.gate) await this.gate;
     if (this.fail) throw new Error("provider down");
     return this.sessions;
   }
@@ -18,6 +22,12 @@ class FakeProvider implements SessionProvider {
     return { dispose: () => { this.cb = undefined; } };
   }
   trigger() { this.cb?.(); }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => { resolve = r; });
+  return { promise, resolve };
 }
 
 const s = (agent: "claude" | "codex", id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
@@ -103,6 +113,35 @@ test("poll refreshes without watch events", async () => {
   await tick(80);
   assert.ok(sent.some((m) => m.type === "changed"));
   daemon.stop();
+});
+
+test("snapshot requested during an in-flight refresh still gets a snapshot reply", async () => {
+  const { sent, claude, daemon } = setup();
+  const gate = deferred();
+  claude.gate = gate.promise;
+  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  daemon.handle({ type: "snapshot" });
+  daemon.handle({ type: "snapshot" });
+  gate.resolve();
+  await tick(30);
+  assert.equal(sent.filter((m) => m.type === "snapshot").length, 2);
+  daemon.stop();
+});
+
+test("stop during an in-flight refresh sends nothing and runs no further snapshots", async () => {
+  const { sent, claude, daemon } = setup();
+  const gate = deferred();
+  claude.gate = gate.promise;
+  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  daemon.handle({ type: "snapshot" });
+  daemon.stop();
+  gate.resolve();
+  await tick(30);
+  assert.equal(sent.filter((m) => m.type === "snapshot" || m.type === "changed").length, 0);
+  assert.equal(claude.snapshotCalls, 1);
+  const before = sent.length;
+  daemon.handle({ type: "ping" });
+  assert.equal(sent.length, before);
 });
 
 test("sameSession compares the fields that matter", () => {
