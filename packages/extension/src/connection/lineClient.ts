@@ -8,6 +8,8 @@ export interface LineClientEvents {
   onSnapshot(sessions: SessionInfo[]): void;
   onChanged(upserted: SessionInfo[], removed: string[]): void;
   onError(message: string): void;
+  /** Non-fatal problems such as an unparsable line; the connection stays open. */
+  onWarning?(message: string): void;
   onClose(): void;
 }
 
@@ -67,7 +69,7 @@ export class LineClient {
     if (this.closed || !line.trim()) return;
     const msg = parseDaemonMessage(line);
     if (!msg) {
-      this.events.onError(`unparsable message: ${line.slice(0, 200)}`);
+      this.events.onWarning?.(`ignoring unparsable line: ${line.slice(0, 200)}`);
       return;
     }
     switch (msg.type) {

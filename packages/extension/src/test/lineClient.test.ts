@@ -14,6 +14,7 @@ function harness(opts = {}) {
     onSnapshot: (s) => calls.push(`snapshot:${s.length}`),
     onChanged: (u, r) => calls.push(`changed:${u.length}:${r.length}`),
     onError: (m) => calls.push(`error:${m}`),
+    onWarning: (m) => calls.push(`warning:${m}`),
     onClose: () => calls.push("close"),
   };
   const client = new LineClient(fromDaemon, toDaemon, events, { pingIntervalMs: 20, pongTimeoutMs: 30, helloTimeoutMs: 50, ...opts });
@@ -104,4 +105,15 @@ test("dispose while the stream is alive closes the readline and stops pings", as
   h.fromDaemon.write('{"type":"snapshot","sessions":[]}\n');
   await tick(5);
   assert.equal(h.calls.length, callsCount);
+});
+
+test("an unparsable line is a warning and does not close the connection", async () => {
+  const h = harness({ pingIntervalMs: 1000, pongTimeoutMs: 1000 });
+  h.client.start();
+  h.fromDaemon.write("Welcome to my shell\n" + hello + "not json\n");
+  await tick(5);
+  h.fromDaemon.write('{"type":"snapshot","sessions":[]}\n');
+  await tick(5);
+  assert.deepEqual(h.calls, ["warning:ignoring unparsable line: Welcome to my shell", "hello:1.2.3", "warning:ignoring unparsable line: not json", "snapshot:0"]);
+  h.client.dispose();
 });

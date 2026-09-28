@@ -36,6 +36,7 @@ export type ProcessFactory = () => DaemonProcess;
 export interface MachineConnectionEvents {
   onStateChange(state: MachineState, error?: string): void;
   onSessions(sessions: Map<string, SessionInfo>): void;
+  onWarning?(message: string): void;
 }
 
 export interface MachineConnectionOptions {
@@ -120,6 +121,7 @@ export class MachineConnection {
           this.events.onSessions(this.sessions);
         },
         onError: (message) => this.onFailure(message),
+        onWarning: (message) => this.events.onWarning?.(message),
         onClose: () => {},
       },
       this.opts.clientOptions,

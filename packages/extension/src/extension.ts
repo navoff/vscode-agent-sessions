@@ -93,6 +93,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           store.setMachineSessions(id, sessions);
           refresh();
         },
+        onWarning: (message) => appendLog(`[${id}] ${message}`),
       },
       { autoReconnect: id === LOCAL_ID || (machines.machines.find((x) => x.id === id)?.autoConnect ?? false) },
     );
