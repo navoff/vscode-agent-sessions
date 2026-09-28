@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { addMachine, removeMachine, updateMachine, type MachineRecord, type MachinesFile } from "./machinesFile.js";
-import { parseSshConfigHosts } from "./sshConfig.js";
+import { isValidSshHost, parseSshConfigHosts } from "./sshConfig.js";
 import { prepareMachine, type SshRunner } from "./prepare.js";
 import type { TreeNode } from "../tree/treeModel.js";
 
@@ -65,7 +65,7 @@ export function registerMachineCommands(context: vscode.ExtensionContext, deps: 
     if (!pick) return;
     let host = pick.host;
     if (!host) {
-      host = (await vscode.window.showInputBox({ title: "SSH host", prompt: "Host name as used by ssh", validateInput: (v) => (v.trim() ? undefined : "Required") }))?.trim() ?? "";
+      host = (await vscode.window.showInputBox({ title: "SSH host", prompt: "Host name as used by ssh", validateInput: (v) => (!v.trim() ? "Required" : isValidSshHost(v.trim()) ? undefined : "Not a valid ssh host") }))?.trim() ?? "";
       if (!host) return;
     }
     const file = addMachine(deps.current(), host);

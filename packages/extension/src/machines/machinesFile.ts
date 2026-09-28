@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { isValidSshHost } from "./sshConfig.js";
 
 export interface MachineRecord {
   id: string;
@@ -23,7 +24,7 @@ const EMPTY: MachinesFile = { version: 1, machines: [] };
 function toRecord(raw: unknown): MachineRecord | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const r = raw as Record<string, unknown>;
-  if (typeof r.id !== "string" || typeof r.sshHost !== "string") return undefined;
+  if (typeof r.id !== "string" || typeof r.sshHost !== "string" || !isValidSshHost(r.sshHost)) return undefined;
   const rec: MachineRecord = {
     id: r.id,
     name: typeof r.name === "string" && r.name ? r.name : r.id,

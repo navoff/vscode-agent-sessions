@@ -7,7 +7,7 @@ export function createSshRunner(sshPath: string, log: (line: string) => void): S
     run(host: string, command: string, stdin?: string): Promise<SshResult> {
       log(`[${host}] $ ${command.length > 200 ? command.slice(0, 200) + "…" : command}`);
       return new Promise((resolve) => {
-        const child = spawn(sshPath, [...SSH_BASE_ARGS, "-T", host, command], { stdio: ["pipe", "pipe", "pipe"] });
+        const child = spawn(sshPath, [...SSH_BASE_ARGS, "-T", "--", host, command], { stdio: ["pipe", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
         child.stdout.on("data", (d) => (stdout += d));

@@ -15,3 +15,9 @@ export function parseSshConfigHosts(text: string): string[] {
   }
   return hosts;
 }
+
+// Rejects hosts that ssh would parse as an option or that cannot be a host.
+export function isValidSshHost(host: string): boolean {
+  if (!host || host.length > 255 || host.startsWith("-")) return false;
+  return !/[\s\x00-\x1f\x7f]/.test(host);
+}

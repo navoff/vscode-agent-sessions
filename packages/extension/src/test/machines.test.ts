@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseSshConfigHosts } from "../machines/sshConfig.js";
+import { isValidSshHost, parseSshConfigHosts } from "../machines/sshConfig.js";
 import { addMachine, parseMachinesFile, parseMachinesFileStrict, readMachinesFile, removeMachine, serializeMachinesFile, updateMachine, writeMachinesFile } from "../machines/machinesFile.js";
 
 test("parseSshConfigHosts returns concrete hosts in order without duplicates", () => {
@@ -78,4 +78,14 @@ test("readMachinesFile tells a missing file from an invalid one", async () => {
   const schema = join(dir, "schema.json");
   await writeFile(schema, '{"version": 1}');
   assert.equal(await readMachinesFile(schema), undefined);
+});
+
+test("isValidSshHost rejects option-like and malformed hosts", () => {
+  for (const bad of ["-oProxyCommand=x", "a b", "", "a\nb", "x".repeat(256)]) assert.equal(isValidSshHost(bad), false, bad);
+  for (const good of ["hetzner", "user@host.example.com"]) assert.equal(isValidSshHost(good), true, good);
+});
+
+test("parseMachinesFile drops records with an invalid sshHost", () => {
+  const f = parseMachinesFile(JSON.stringify({ version: 1, machines: [{ id: "a", sshHost: "-oProxyCommand=x" }, { id: "b", sshHost: "b" }] }));
+  assert.deepEqual(f.machines.map((m) => m.id), ["b"]);
 });

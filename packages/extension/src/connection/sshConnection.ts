@@ -8,7 +8,7 @@ function shellQuote(s: string): string {
 export const SSH_BASE_ARGS = ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "ConnectTimeout=15"];
 
 export function spawnSshDaemon(sshPath: string, sshHost: string, remoteNode: string, remoteDaemon: string, log: (line: string) => void): DaemonProcess {
-  const child = spawn(sshPath, [...SSH_BASE_ARGS, "-T", sshHost, `${shellQuote(remoteNode)} ${shellQuote(remoteDaemon)} --stdio`], {
+  const child = spawn(sshPath, [...SSH_BASE_ARGS, "-T", "--", sshHost, `${shellQuote(remoteNode)} ${shellQuote(remoteDaemon)} --stdio`], {
     stdio: ["pipe", "pipe", "pipe"],
   });
   child.stderr.on("data", (d) => log(`[${sshHost}] ${String(d).trimEnd()}`));
