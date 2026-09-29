@@ -197,6 +197,22 @@ test("deleteSession goes through the connected daemon and fails when not connect
   h.conn.dispose();
 });
 
+test("pendingOpen goes through the connected daemon", async () => {
+  const h = harness();
+  const session = { agent: "claude" as const, id: "a", title: "a", cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle" as const };
+  await assert.rejects(h.conn.pendingOpen(session), /not connected/);
+  h.conn.connect();
+  await tick(5);
+  h.procs[0].stdout.write(hello);
+  await tick(5);
+  const done = h.conn.pendingOpen(session);
+  await tick(5);
+  const req = JSON.parse(h.procs[0].received.find((l) => l.includes('"pendingOpen"'))!);
+  h.procs[0].stdout.write(JSON.stringify({ type: "pendingOpenResult", requestId: req.requestId, ok: true }) + "\n");
+  await done;
+  h.conn.dispose();
+});
+
 test("isProtocolMismatch recognises the daemon's answer to another protocol", () => {
   assert.equal(isProtocolMismatch("unsupported protocol 2, daemon speaks 1"), true);
   assert.equal(isProtocolMismatch("daemon exited with code 1"), false);

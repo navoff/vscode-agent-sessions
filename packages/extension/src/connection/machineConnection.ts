@@ -115,6 +115,12 @@ export class MachineConnection {
     return this.client.deleteSession(agent, id);
   }
 
+  /** Records a pending open through the connected daemon; see LineClient.pendingOpen. */
+  pendingOpen(session: SessionInfo): Promise<void> {
+    if (!this.client || this.state !== "connected") return Promise.reject(new Error("the machine is not connected"));
+    return this.client.pendingOpen(session);
+  }
+
   private open(): void {
     this.setState("connecting");
     const gen = ++this.generation;

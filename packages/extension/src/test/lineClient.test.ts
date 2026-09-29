@@ -178,3 +178,21 @@ test("deleteSession rejects on timeout, on close and when already closed", async
   await assert.rejects(pending, /connection closed/);
   await assert.rejects(h.client.deleteSession("codex", "u3"), /not connected/);
 });
+
+test("pendingOpen sends the session and settles on the result", async () => {
+  const h = harness();
+  h.client.start();
+  const session = { agent: "claude" as const, id: "a", title: "a", cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle" as const };
+  const done = h.client.pendingOpen(session);
+  await tick(5);
+  const req = JSON.parse(h.sentToDaemon.find((l) => l.includes('"pendingOpen"'))!);
+  assert.deepEqual(req.session, session);
+  h.fromDaemon.write(JSON.stringify({ type: "pendingOpenResult", requestId: req.requestId, ok: false, error: "/w does not exist" }) + "\n");
+  await assert.rejects(done, /\/w does not exist/);
+  const ok = h.client.pendingOpen(session);
+  await tick(5);
+  const req2 = JSON.parse(h.sentToDaemon.find((l) => l.includes('"pendingOpen"') && !l.includes(`"requestId":"${req.requestId}"`))!);
+  h.fromDaemon.write(JSON.stringify({ type: "pendingOpenResult", requestId: req2.requestId, ok: true }) + "\n");
+  await ok;
+  h.client.dispose();
+});

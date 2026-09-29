@@ -17,7 +17,7 @@ export interface LineClientOptions {
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
   helloTimeoutMs?: number;
-  /** How long a delete request may wait for its "deleteResult". Default 45 s, longer than the daemon's 30 s limit on `codex delete`. */
+  /** How long a request may wait for its answer. Default 45 s, longer than the daemon's 30 s limit on `codex delete`. */
   requestTimeoutMs?: number;
 }
 
@@ -74,22 +74,32 @@ export class LineClient {
   }
 
   /**
-   * Asks the daemon to delete a session permanently. Resolves on success;
+   * Sends a request that the daemon answers by requestId. Resolves on ok;
    * rejects with the daemon's error, on timeout, or when the connection
    * closes first.
    */
-  deleteSession(agent: AgentKind, id: string): Promise<void> {
+  private request(build: (requestId: string) => ClientMessage, timeoutNote: string): Promise<void> {
     if (this.closed) return Promise.reject(new Error("not connected"));
     const requestId = String(++this.nextRequestId);
     const done = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error(`no answer within ${Math.round(this.requestTimeoutMs / 1000)} s; the deletion may still complete`));
+        reject(new Error(`no answer within ${Math.round(this.requestTimeoutMs / 1000)} s${timeoutNote}`));
       }, this.requestTimeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
     });
-    this.send({ type: "delete", requestId, agent, id });
+    this.send(build(requestId));
     return done;
+  }
+
+  /** Asks the daemon to delete a session permanently. */
+  deleteSession(agent: AgentKind, id: string): Promise<void> {
+    return this.request((requestId) => ({ type: "delete", requestId, agent, id }), "; the deletion may still complete");
+  }
+
+  /** Asks the daemon to record `session` for a window on its folder to open. */
+  pendingOpen(session: SessionInfo): Promise<void> {
+    return this.request((requestId) => ({ type: "pendingOpen", requestId, session }), "");
   }
 
   private settle(requestId: string, error: Error | undefined): void {
@@ -137,6 +147,9 @@ export class LineClient {
         return;
       case "deleteResult":
         this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "delete failed"));
+        return;
+      case "pendingOpenResult":
+        this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "pending open failed"));
         return;
       case "error":
         this.events.onError(msg.message);
