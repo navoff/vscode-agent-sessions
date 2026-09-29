@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
 import { readFileSync, unlinkSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClaudeProvider, CodexProvider } from "@agent-sessions/core";
 import { Daemon } from "./daemon.js";
 import { parseClientMessage, type DaemonMessage } from "./protocol.js";
-import { removeStaleSocket, serveOnSocket, type SocketServer } from "./server.js";
+import { ensurePrivateDir, removeStaleSocket, serveOnSocket, type SocketServer } from "./server.js";
 
 declare const __DAEMON_VERSION__: string | undefined;
 const VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : "0.0.0-dev";
@@ -57,7 +57,7 @@ export function main(argv: string[]): void {
       process.exit(2);
     }
     void (async () => {
-      await mkdir(dirname(socketPath), { recursive: true });
+      await ensurePrivateDir(dirname(socketPath));
       await removeStaleSocket(socketPath);
       const pidFile = join(dirname(socketPath), "daemon.pid");
       // Removes the pid file unless a successor has already replaced it.

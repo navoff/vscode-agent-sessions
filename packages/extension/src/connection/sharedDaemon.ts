@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { openSync, closeSync, readFileSync } from "node:fs";
-import { mkdir, open, readFile, stat, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 
@@ -22,6 +22,22 @@ export function socketDir(env: NodeJS.ProcessEnv, home: string): string {
 
 export function sharedDaemonPaths(dir: string): SharedDaemonPaths {
   return { socket: join(dir, "daemon.sock"), lock: join(dir, "daemon.lock"), log: join(dir, "daemon.log"), version: join(dir, "daemon.version"), pid: join(dir, "daemon.pid") };
+}
+
+/**
+ * Creates `dir` as 0700 and refuses it unless it is a real directory owned by
+ * the current user and not writable by group or others: otherwise another
+ * user could plant the socket, the pid file or a symlink at the log. A
+ * directory created 0755 by an older version is narrowed to 0700.
+ */
+export async function ensurePrivateDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const st = await lstat(dir);
+  const uid = process.getuid?.();
+  if (!st.isDirectory() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o022) !== 0) {
+    throw new Error(`unsafe socket directory ${dir}: it must be a directory owned by the current user and not writable by group or others`);
+  }
+  if ((st.mode & 0o077) !== 0) await chmod(dir, 0o700);
 }
 
 /**
@@ -140,12 +156,12 @@ export async function ensureSharedDaemon(opts: EnsureOptions): Promise<Socket> {
   const retryMs = opts.retryMs ?? 100;
   const connectTo = opts.connect ?? connectSocket;
   const { socket, lock } = opts.paths;
+  await ensurePrivateDir(dirname(socket));
   try {
     return await connectTo(socket, 1000);
   } catch {
     // nothing listening yet
   }
-  await mkdir(dirname(lock), { recursive: true });
   let held = await acquireLock(lock, 30_000, Date.now());
   try {
     if (held) {
@@ -196,8 +212,8 @@ export async function spawnDetachedDaemon(
   logPath: string,
   onError?: (err: Error) => void,
 ): Promise<void> {
-  await mkdir(dirname(logPath), { recursive: true });
-  const fd = openSync(logPath, "a");
+  await ensurePrivateDir(dirname(logPath));
+  const fd = openSync(logPath, "a", 0o600);
   try {
     const child = spawn(process.execPath, [daemonPath, "--listen", socketPath], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },

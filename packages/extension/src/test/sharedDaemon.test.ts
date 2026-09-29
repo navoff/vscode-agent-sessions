@@ -5,7 +5,7 @@ import { chmod, mkdtemp, readFile, writeFile, utimes, stat } from "node:fs/promi
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, daemonProcessAlive, ensureSharedDaemon, readDaemonPid, stopDaemonProcess, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
+import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, daemonProcessAlive, ensurePrivateDir, ensureSharedDaemon, readDaemonPid, stopDaemonProcess, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
 
 test("socketDir prefers XDG_RUNTIME_DIR and falls back to home", () => {
   assert.equal(socketDir({ XDG_RUNTIME_DIR: "/run/user/1" }, "/home/u"), "/run/user/1/agent-sessions");
@@ -244,4 +244,31 @@ test("daemonProcessAlive rejects dead pids and processes that are not the daemon
   assert.equal(daemonProcessAlive(2 ** 22 + 1), false);
   // This test runner is alive but is not "daemon.mjs --listen".
   assert.equal(daemonProcessAlive(process.pid), process.platform !== "linux");
+});
+
+test("ensureSharedDaemon refuses a socket directory writable by others", async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("the check is about other users; skip as root");
+    return;
+  }
+  const dir = await mkdtemp(join(tmpdir(), "as-unsafe-"));
+  await chmod(dir, 0o777);
+  let spawned = 0;
+  await assert.rejects(
+    () => ensureSharedDaemon({ paths: sharedDaemonPaths(dir), retryMs: 20, connectTimeoutMs: 150, spawnDaemon: () => { spawned++; }, log: () => {} }),
+    /unsafe socket directory/,
+  );
+  assert.equal(spawned, 0);
+});
+
+test("ensurePrivateDir creates 0700 directories and narrows an existing 0755 one", async () => {
+  const root = await mkdtemp(join(tmpdir(), "as-private-"));
+  const fresh = join(root, "a", "agent-sessions");
+  await ensurePrivateDir(fresh);
+  assert.equal((await stat(fresh)).mode & 0o777, 0o700);
+  const old = join(root, "old");
+  await ensurePrivateDir(old);
+  await chmod(old, 0o755);
+  await ensurePrivateDir(old);
+  assert.equal((await stat(old)).mode & 0o777, 0o700);
 });

@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { connect, type Socket } from "node:net";
 import { createInterface } from "node:readline";
-import { mkdtemp, writeFile, stat } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionInfo, SessionProvider } from "@agent-sessions/core";
 import { Daemon } from "../daemon.js";
-import { removeStaleSocket, serveOnSocket, type SocketServer } from "../server.js";
+import { ensurePrivateDir, removeStaleSocket, serveOnSocket, type SocketServer } from "../server.js";
 
 class FakeProvider implements SessionProvider {
   readonly agent = "claude" as const;
@@ -191,4 +191,16 @@ test("serveOnSocket rejects a socket path that is too long", async () => {
   const daemon = new Daemon({ providers: [new FakeProvider()], version: "t", home: "/h" });
   await assert.rejects(serveOnSocket(daemon, path, { idleTimeoutMs: 60_000, log: () => {} }), /too long/);
   daemon.stop();
+});
+
+test("ensurePrivateDir creates a 0700 directory and refuses one writable by others", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "as-private-"));
+  await ensurePrivateDir(join(root, "sock"));
+  assert.equal((await stat(join(root, "sock"))).mode & 0o777, 0o700);
+  if (process.getuid?.() === 0) {
+    t.skip("the check is about other users; skip as root");
+    return;
+  }
+  await chmod(root, 0o777);
+  await assert.rejects(ensurePrivateDir(root), /unsafe socket directory/);
 });

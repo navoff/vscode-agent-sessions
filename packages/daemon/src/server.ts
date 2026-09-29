@@ -1,5 +1,5 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
-import { unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import type { Daemon } from "./daemon.js";
 import { parseClientMessage } from "./protocol.js";
@@ -22,6 +22,22 @@ export interface SocketServer {
   finish(): void;
   /** Resolves once finish() has removed the socket file and every connection is closed. */
   close(): Promise<void>;
+}
+
+/**
+ * Creates `dir` as 0700 and refuses it unless it is a real directory owned by
+ * the current user and not writable by group or others: otherwise another
+ * user could plant the socket, the pid file or a symlink at the log. A
+ * directory created 0755 by an older version is narrowed to 0700.
+ */
+export async function ensurePrivateDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const st = await lstat(dir);
+  const uid = process.getuid?.();
+  if (!st.isDirectory() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o022) !== 0) {
+    throw new Error(`unsafe socket directory ${dir}: it must be a directory owned by the current user and not writable by group or others`);
+  }
+  if ((st.mode & 0o077) !== 0) await chmod(dir, 0o700);
 }
 
 /** Deletes `path` when nothing listens on it. A live socket is left alone. */
