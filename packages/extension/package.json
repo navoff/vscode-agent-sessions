@@ -30,6 +30,7 @@
     "commands": [
       { "command": "agentSessions.refresh", "title": "Refresh", "category": "Agent Sessions", "icon": "$(refresh)" },
       { "command": "agentSessions.openSession", "title": "Open Session", "category": "Agent Sessions" },
+      { "command": "agentSessions.clickSession", "title": "Open Session (click)", "category": "Agent Sessions" },
       { "command": "agentSessions.markRead", "title": "Mark as Read", "category": "Agent Sessions" },
       { "command": "agentSessions.markUnread", "title": "Mark as Unread", "category": "Agent Sessions" },
       { "command": "agentSessions.hideSession", "title": "Hide Session", "category": "Agent Sessions" },
@@ -83,6 +84,7 @@
       ],
       "commandPalette": [
         { "command": "agentSessions.openSession", "when": "false" },
+        { "command": "agentSessions.clickSession", "when": "false" },
         { "command": "agentSessions.markRead", "when": "false" },
         { "command": "agentSessions.markUnread", "when": "false" },
         { "command": "agentSessions.hideSession", "when": "false" },
@@ -102,6 +104,7 @@
         "agentSessions.autoConnectOnStartup": { "type": "boolean", "default": true, "description": "Connect the local machine and machines marked autoConnect when VS Code starts." },
         "agentSessions.ssh.path": { "type": "string", "default": "ssh", "description": "Path to the ssh binary used for remote machines." },
         "agentSessions.showHidden": { "type": "boolean", "default": false, "description": "Show hidden sessions in the tree." },
+        "agentSessions.openOn": { "type": "string", "enum": ["doubleClick", "singleClick"], "default": "doubleClick", "enumDescriptions": ["A single click only selects the session; open it with a double click.", "Open the session on a single click."], "description": "How a click on a session in the tree opens it." },
       "agentSessions.codex.openTarget": {
         "type": "string",
         "enum": ["sidebar", "panel"],

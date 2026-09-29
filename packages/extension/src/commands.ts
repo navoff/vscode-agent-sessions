@@ -4,6 +4,7 @@ import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
 import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState } from "./tree/filterPicker.js";
 import type { SessionNode, TreeNode } from "./tree/treeModel.js";
 import { selectionTargets } from "./tree/selection.js";
+import { DoubleClickDetector } from "./tree/clickDetector.js";
 
 export type { FilterState };
 
@@ -87,6 +88,16 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
   reg("agentSessions.openSession", async (node) => {
     const s = sessionOf(node);
     if (s) await openSession(deps, s.machineId, s.session);
+  });
+  // Tree item clicks: a single click only selects when agentSessions.openOn is
+  // "doubleClick" (the default); the context menu command above always opens.
+  const clicks = new DoubleClickDetector();
+  reg("agentSessions.clickSession", async (node) => {
+    const s = sessionOf(node);
+    if (!s) return;
+    const mode = vscode.workspace.getConfiguration("agentSessions").get<string>("openOn", "doubleClick");
+    if (mode === "doubleClick" && !clicks.click(`${s.machineId}/${s.session.agent}:${s.session.id}`)) return;
+    await openSession(deps, s.machineId, s.session);
   });
   regMulti("agentSessions.markRead", (targets) => {
     const now = Date.now();

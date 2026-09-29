@@ -85,7 +85,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     md.appendMarkdown(`\n- Created: ${new Date(s.createdAt).toLocaleString()}\n- Updated: ${new Date(s.updatedAt).toLocaleString()}\n`);
     item.tooltip = md;
     item.contextValue = sessionContextValue(row);
-    item.command = { command: "agentSessions.openSession", title: "Open Session", arguments: [node] };
+    item.command = { command: "agentSessions.clickSession", title: "Open Session", arguments: [node] };
     return item;
   }
 }
