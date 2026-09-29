@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import type { Disposable, SessionInfo, SessionProvider, SessionStatus } from "../types.js";
+import { basename, join } from "node:path";
+import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
 import { isValidSessionId } from "../util/sessionId.js";
 import { guardWatcher } from "../util/watch.js";
 import { listRolloutFiles } from "./discovery.js";
@@ -37,6 +37,13 @@ export const execFileRunner: CommandRunner = (file, args, opts) =>
 
 const DELETE_TIMEOUT_MS = 30_000;
 
+/** The lines of stderr that start with "Error" if any, else the first 500 characters of the output. */
+function errorText(r: CommandResult): string {
+  const errors = r.stderr.split("\n").map((l) => l.trim()).filter((l) => /^Error\b/.test(l));
+  if (errors.length) return errors.join(" | ").slice(0, 500);
+  return (r.stderr.trim() || r.stdout.trim()).slice(0, 500);
+}
+
 export interface CodexProviderOptions {
   codexDir?: string;
   log?: (msg: string) => void;
@@ -58,8 +65,6 @@ export class CodexProvider implements SessionProvider {
   private readonly codexDir: string;
   private readonly log: (msg: string) => void;
   private readonly cache = new Map<string, CacheEntry>();
-  /** Statuses from the last snapshot, to refuse deleting a running session. */
-  private statuses = new Map<string, SessionStatus>();
   private readonly env: NodeJS.ProcessEnv;
   private readonly runCommand: CommandRunner;
   private readonly deleteTimeoutMs: number;
@@ -115,7 +120,6 @@ export class CodexProvider implements SessionProvider {
       });
     }
     for (const key of this.cache.keys()) if (!seen.has(key)) this.cache.delete(key);
-    this.statuses = new Map([...result.values()].map((s) => [s.id, s.status]));
     return [...result.values()];
   }
 
@@ -128,7 +132,7 @@ export class CodexProvider implements SessionProvider {
    */
   async delete(id: string): Promise<void> {
     if (!isValidSessionId(id)) throw new Error(`invalid Codex session id ${JSON.stringify(id.slice(0, 80))}`);
-    if (this.statuses.get(id) === "running") throw new Error("the session is running, wait until it finishes or stop it before deleting");
+    if (await this.isRunningNow(id)) throw new Error("the session is running, wait until it finishes or stop it before deleting");
     // --force skips the interactive confirmation; the user confirmed in VS Code.
     const args = ["delete", "--force", "--", id];
     const opts = { env: { ...this.env, CODEX_HOME: this.codexDir }, timeoutMs: this.deleteTimeoutMs };
@@ -142,7 +146,7 @@ export class CodexProvider implements SessionProvider {
       if (bin) throw new Error(`CODEX_BIN ${bin} not found`);
       this.log("codex: codex not on PATH, trying a login shell");
       try {
-        result = await this.runCommand("bash", ["-lc", 'exec codex delete --force -- "$1"', "_", id], opts);
+        result = await this.runCommand("bash", ["-lc", 'CODEX_HOME="$2" exec codex delete --force -- "$1"', "_", id, this.codexDir], opts);
       } catch (err2) {
         throw new Error(`codex not found on PATH and no bash to look further: ${String(err2)}`);
       }
@@ -150,11 +154,33 @@ export class CodexProvider implements SessionProvider {
     }
     if (result.code !== 0) {
       const what = result.code === null ? `timed out after ${Math.round(this.deleteTimeoutMs / 1000)} s` : `exit ${result.code}`;
-      const text = (result.stderr.trim() || result.stdout.trim()).slice(0, 500);
+      const text = errorText(result);
       throw new Error(`codex delete failed (${what})${text ? `: ${text}` : ""}`);
     }
-    this.statuses.delete(id);
     this.log(`codex: deleted session ${id}`);
+  }
+
+  /**
+   * Whether the session's rollout ends in a started task, read from the
+   * file now: the last snapshot may be up to a poll interval old. Rollouts
+   * seen by a snapshot are found through the cache, others by their file
+   * name (rollout-<time>-<id>.jsonl). No rollout found means not running.
+   */
+  private async isRunningNow(id: string): Promise<boolean> {
+    let files = [...this.cache.entries()].filter(([, e]) => e.info?.meta.id === id).map(([f]) => f);
+    if (files.length === 0) {
+      const lower = id.toLowerCase();
+      files = (await listRolloutFiles(join(this.codexDir, "sessions"))).filter((f) => basename(f).toLowerCase().endsWith(`-${lower}.jsonl`));
+    }
+    for (const file of files) {
+      try {
+        const info = await readRolloutInfo(file, (await stat(file)).size);
+        if (info?.meta.id === id && info.status === "running") return true;
+      } catch {
+        // gone or unreadable: codex decides
+      }
+    }
+    return false;
   }
 
   watch(onChange: () => void): Disposable {

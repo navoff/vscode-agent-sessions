@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
@@ -19,7 +19,7 @@ export interface SdkSessionInfo {
 }
 
 export type ListSessions = () => Promise<SdkSessionInfo[]>;
-export type DeleteSession = (sessionId: string) => Promise<void>;
+export type DeleteSession = (sessionId: string, options?: { dir?: string }) => Promise<void>;
 
 export interface ClaudeProviderOptions {
   claudeDir?: string;
@@ -35,9 +35,29 @@ async function sdkListSessions(): Promise<SdkSessionInfo[]> {
   return (await sdk.listSessions({})) as SdkSessionInfo[];
 }
 
-async function sdkDeleteSession(sessionId: string): Promise<void> {
+async function sdkDeleteSession(sessionId: string, options?: { dir?: string }): Promise<void> {
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
-  await sdk.deleteSession(sessionId);
+  await sdk.deleteSession(sessionId, options);
+}
+
+/** Every `<projects>/<project>/<id>.jsonl` that exists. */
+async function findTranscripts(projectsDir: string, id: string): Promise<string[]> {
+  let projects: string[];
+  try {
+    projects = await readdir(projectsDir);
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const project of projects) {
+    const path = join(projectsDir, project, `${id}.jsonl`);
+    try {
+      if ((await stat(path)).isFile()) found.push(path);
+    } catch {
+      // not in this project
+    }
+  }
+  return found;
 }
 
 interface ActivityEntry {
@@ -54,6 +74,8 @@ export class ClaudeProvider implements SessionProvider {
   private readonly isAlive: (pid: number) => boolean;
   private readonly log: (msg: string) => void;
   private readonly activity = new Map<string, ActivityEntry>();
+  /** Working directories from the last snapshot, passed to the SDK as `dir`. */
+  private cwds = new Map<string, string>();
 
   constructor(opts: ClaudeProviderOptions = {}) {
     this.claudeDir = opts.claudeDir ?? join(homedir(), ".claude");
@@ -84,6 +106,7 @@ export class ClaudeProvider implements SessionProvider {
       seen.add(path);
     }
     for (const key of this.activity.keys()) if (!seen.has(key)) this.activity.delete(key);
+    this.cwds = new Map(sessions.filter((s) => s.cwd).map((s) => [s.sessionId, s.cwd as string]));
     return sessions.map((s) => {
       const live = registry.get(s.sessionId);
       const info: SessionInfo = {
@@ -102,14 +125,28 @@ export class ClaudeProvider implements SessionProvider {
 
   /**
    * Deletes the session transcript and its subagent transcripts through the
-   * SDK. A session that is working right now (busy in the registry) is
-   * refused: its process would keep writing to the deleted transcript.
+   * SDK. A session with a live Claude Code process (busy or idle) is
+   * refused: that process would write the transcript again. So is an id
+   * whose transcript exists in several project folders, where the SDK
+   * would delete whichever it finds first.
    */
   async delete(id: string): Promise<void> {
     if (!isValidSessionId(id)) throw new Error(`invalid Claude session id ${JSON.stringify(id.slice(0, 80))}`);
-    const registry = await readClaudeRegistry(join(this.claudeDir, "sessions"), this.isAlive);
-    if (registry.get(id)?.status === "busy") throw new Error("the session is running, wait until it finishes or stop it before deleting");
-    await this.deleteSession(id);
+    const live = (await readClaudeRegistry(join(this.claudeDir, "sessions"), this.isAlive)).get(id);
+    if (live) throw new Error(`the session is open in Claude Code (pid ${live.pid}); close it in Claude Code first`);
+    const files = await findTranscripts(join(this.claudeDir, "projects"), id);
+    if (files.length > 1) {
+      throw new Error(`the session has transcripts in ${files.length} project folders (${files.map((f) => f.split("/").at(-2)).join(", ")}); not deleting any of them`);
+    }
+    const dir = this.cwds.get(id);
+    try {
+      await this.deleteSession(id, dir ? { dir } : undefined);
+    } catch (err) {
+      // The transcript lives under another project than its cwd (the cwd
+      // changed during the session); it is the only one, so search for it.
+      if (!dir || !/not found in project directory for/.test(String(err))) throw err;
+      await this.deleteSession(id);
+    }
     this.log(`claude: deleted session ${id}`);
   }
 

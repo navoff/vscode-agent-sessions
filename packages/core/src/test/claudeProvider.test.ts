@@ -132,33 +132,75 @@ test("watch fires on project file changes", async (t) => {
   assert.ok(fired > 0);
 });
 
-test("delete calls the SDK for an idle session", async () => {
-  const claudeDir = await makeClaudeDir();
-  const deleted: string[] = [];
-  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdk, isAlive: () => true, deleteSession: async (id) => { deleted.push(id); } });
-  await p.delete("b");
-  assert.deepEqual(deleted, ["b"]);
+const ID1 = "11111111-2222-4333-8444-555555555555";
+const ID2 = "66666666-7777-4888-9999-aaaaaaaaaaaa";
+
+/** A Claude dir with ID1 in project -w (cwd /w) and, optionally, a registry entry for it. */
+async function makeDeleteDir(live?: "busy" | "idle"): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "claude-del-"));
+  await mkdir(join(dir, "sessions"));
+  await mkdir(join(dir, "projects", "-w"), { recursive: true });
+  await writeFile(join(dir, "projects", "-w", `${ID1}.jsonl`), jsonl({ type: "user", timestamp: new Date(T1).toISOString() }));
+  if (live) await writeFile(join(dir, "sessions", "700.json"), JSON.stringify({ pid: 700, sessionId: ID1, cwd: "/w", status: live, updatedAt: 1, statusUpdatedAt: 1 }));
+  return dir;
+}
+const sdkDel: SdkSessionInfo[] = [{ sessionId: ID1, summary: "s", cwd: "/w", lastModified: 1 }];
+type DelCall = [string, { dir?: string } | undefined];
+
+test("delete calls the SDK with the session's cwd as dir", async () => {
+  const claudeDir = await makeDeleteDir();
+  const calls: DelCall[] = [];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, isAlive: () => true, deleteSession: async (id, o) => { calls.push([id, o]); } });
+  await p.delete(ID1);
+  assert.deepEqual(calls, [[ID1, undefined]]);
+  await p.snapshot();
+  await p.delete(ID1);
+  assert.deepEqual(calls[1], [ID1, { dir: "/w" }]);
 });
 
-test("delete refuses a session that is busy in the registry", async () => {
-  const claudeDir = await makeClaudeDir();
-  const deleted: string[] = [];
-  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdk, isAlive: () => true, deleteSession: async (id) => { deleted.push(id); } });
-  await assert.rejects(p.delete("a"), /running/);
-  assert.equal(deleted.length, 0);
-  // The same session with its process gone is no longer running.
-  const dead = new ClaudeProvider({ claudeDir, listSessions: async () => sdk, isAlive: () => false, deleteSession: async (id) => { deleted.push(id); } });
-  await dead.delete("a");
-  assert.deepEqual(deleted, ["a"]);
+test("delete retries without dir when the transcript is not under the cwd's project", async () => {
+  const claudeDir = await makeDeleteDir();
+  const calls: DelCall[] = [];
+  const p = new ClaudeProvider({
+    claudeDir, listSessions: async () => sdkDel, isAlive: () => true,
+    deleteSession: async (id, o) => { calls.push([id, o]); if (o?.dir) throw new Error(`Session ${id} not found in project directory for ${o.dir}`); },
+  });
+  await p.snapshot();
+  await p.delete(ID1);
+  assert.deepEqual(calls, [[ID1, { dir: "/w" }], [ID1, undefined]]);
 });
 
-test("delete rejects an invalid id and passes SDK errors through", async () => {
-  const claudeDir = await makeClaudeDir();
-  const deleted: string[] = [];
-  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdk, deleteSession: async (id) => { deleted.push(id); } });
-  await assert.rejects(p.delete("../x"), /invalid Claude session id/);
-  await assert.rejects(p.delete("-rf"), /invalid Claude session id/);
-  assert.equal(deleted.length, 0);
-  const failing = new ClaudeProvider({ claudeDir, listSessions: async () => sdk, deleteSession: async () => { throw new Error("Session b not found"); } });
-  await assert.rejects(failing.delete("b"), /not found/);
+test("delete refuses a session with a live Claude Code process, busy or idle", async () => {
+  for (const live of ["busy", "idle"] as const) {
+    const claudeDir = await makeDeleteDir(live);
+    const calls: DelCall[] = [];
+    const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, isAlive: () => true, deleteSession: async (id, o) => { calls.push([id, o]); } });
+    await assert.rejects(p.delete(ID1), /open in Claude Code \(pid 700\); close it in Claude Code first/, live);
+    assert.equal(calls.length, 0);
+    // The same entry with its process gone does not count.
+    const dead = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, isAlive: () => false, deleteSession: async (id, o) => { calls.push([id, o]); } });
+    await dead.delete(ID1);
+    assert.equal(calls.length, 1);
+  }
+});
+
+test("delete refuses an id whose transcript exists in several project folders", async () => {
+  const claudeDir = await makeDeleteDir();
+  await mkdir(join(claudeDir, "projects", "-other"));
+  await writeFile(join(claudeDir, "projects", "-other", `${ID1}.jsonl`), "{}\n");
+  const calls: DelCall[] = [];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, deleteSession: async (id, o) => { calls.push([id, o]); } });
+  await assert.rejects(p.delete(ID1), /transcripts in 2 project folders/);
+  assert.equal(calls.length, 0);
+});
+
+test("delete rejects a non-UUID id and passes SDK errors through", async () => {
+  const claudeDir = await makeDeleteDir();
+  const calls: DelCall[] = [];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, deleteSession: async (id, o) => { calls.push([id, o]); } });
+  for (const bad of ["../x", "-rf", "b", `${ID1}x`, ""]) await assert.rejects(p.delete(bad), /invalid Claude session id/, bad);
+  assert.equal(calls.length, 0);
+  await p.delete(ID1.toUpperCase());
+  const failing = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, deleteSession: async () => { throw new Error(`Session ${ID2} not found`); } });
+  await assert.rejects(failing.delete(ID2), /not found/);
 });
