@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentKind } from "@agent-sessions/core";
+import { PROTOCOL_VERSION } from "@agent-sessions/daemon";
+import { daemonVersionAction, protocolMismatchAction } from "./connection/daemonUpgrade.js";
 import { isProtocolMismatch, MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
 import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnection.js";
 import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
@@ -114,7 +116,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           refresh();
           if (id === LOCAL_ID && state === "connected") checkLocalDaemonVersion(conn);
           if (state === "error" && isProtocolMismatch(error)) {
-            if (id === LOCAL_ID) onLocalProtocolMismatch(conn);
+            if (id === LOCAL_ID) onLocalProtocolMismatch(conn, error);
             else onRemoteProtocolMismatch(id, error ?? "");
           }
         },
@@ -152,17 +154,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refresh();
   };
 
-  // Restarts the shared daemon when its version differs from the bundled one,
-  // unless it was started less than a minute ago (see daemonFreshForMs); then
-  // checks again once that minute is over.
+  // A shared daemon newer than this window was started by an updated window;
+  // replacing it would only make the windows restart each other. Say so once.
+  let newerDaemonWarned = false;
+  const onNewerLocalDaemon = (what: string) => {
+    appendLog(`[${LOCAL_ID}] local daemon is newer than this extension (${what}), leaving it running`);
+    if (newerDaemonWarned) return;
+    newerDaemonWarned = true;
+    void vscode.window.showWarningMessage(`Agent Sessions: the running daemon is from a newer version of the extension (${what}). Reload this window or update the extension.`);
+  };
+
+  // Restarts the shared daemon when it is older than the bundled one (see
+  // daemonVersionAction), unless it was started less than a minute ago (see
+  // daemonFreshForMs); then checks again once that minute is over.
   let versionCheckTimer: ReturnType<typeof setTimeout> | undefined;
   const checkLocalDaemonVersion = (c: MachineConnection | undefined) => {
     const running = c?.daemonVersion;
-    if (!c || bundledDaemonVersion === undefined || running === undefined || running === bundledDaemonVersion) return;
+    if (!c || bundledDaemonVersion === undefined || running === undefined) return;
+    const action = daemonVersionAction(running, bundledDaemonVersion);
+    if (action === "keep") return;
+    if (action === "newer") {
+      onNewerLocalDaemon(`${running}, bundled ${bundledDaemonVersion}`);
+      return;
+    }
     void daemonFreshForMs(localDaemonPaths().version, running, Date.now()).then((freshMs) => {
       if (connections.get(LOCAL_ID) !== c || c.state !== "connected" || c.daemonVersion !== running) return;
       if (freshMs > 0) {
-        appendLog(`[${LOCAL_ID}] local daemon ${running} differs from bundled ${bundledDaemonVersion} but was just started, checking again in ${Math.ceil(freshMs / 1000)} s`);
+        appendLog(`[${LOCAL_ID}] local daemon ${running} is older than bundled ${bundledDaemonVersion} but was just started, checking again in ${Math.ceil(freshMs / 1000)} s`);
         if (versionCheckTimer) clearTimeout(versionCheckTimer);
         versionCheckTimer = setTimeout(() => {
           versionCheckTimer = undefined;
@@ -170,18 +188,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }, freshMs + 100);
         return;
       }
-      appendLog(`[${LOCAL_ID}] local daemon ${running} differs from bundled ${bundledDaemonVersion}, restarting`);
+      appendLog(`[${LOCAL_ID}] local daemon ${running} is older than bundled ${bundledDaemonVersion}, restarting`);
       void restartLocalDaemon(true);
     });
   };
 
-  // A shared daemon that speaks another protocol (such as one started by an
-  // older version still running) never says hello, so the version check above
-  // never runs. Restart it the same way, with the same one-minute grace for a
-  // daemon that some window has just started; the connection keeps retrying
-  // meanwhile, and every failed attempt comes back here.
-  const onLocalProtocolMismatch = (c: MachineConnection | undefined) => {
-    if (!c || versionCheckTimer || restarting) return;
+  // A shared daemon that speaks another protocol never says hello, so the
+  // version check above never runs. An older one (started by an older version
+  // still running) is restarted the same way, with the same one-minute grace
+  // for a daemon that some window has just started; the connection keeps
+  // retrying meanwhile, and every failed attempt comes back here. A newer one
+  // is left alone.
+  const onLocalProtocolMismatch = (c: MachineConnection | undefined, error: string | undefined) => {
+    if (!c) return;
+    const action = protocolMismatchAction(error, PROTOCOL_VERSION);
+    if (action === "newer") {
+      onNewerLocalDaemon(error ?? "");
+      return;
+    }
+    if (action !== "restart") {
+      appendLog(`[${LOCAL_ID}] cannot tell the local daemon's protocol from "${error ?? ""}", leaving it running`);
+      return;
+    }
+    if (versionCheckTimer || restarting) return;
     const versionFile = localDaemonPaths().version;
     void readFile(versionFile, "utf8")
       .then((t) => t.trim(), () => "")
@@ -189,14 +218,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       .then((freshMs) => {
         if (connections.get(LOCAL_ID) !== c || c.state === "connected" || versionCheckTimer) return;
         if (freshMs > 0) {
-          appendLog(`[${LOCAL_ID}] local daemon speaks another protocol but was just started, restarting it in ${Math.ceil(freshMs / 1000)} s`);
+          appendLog(`[${LOCAL_ID}] local daemon speaks an older protocol but was just started, restarting it in ${Math.ceil(freshMs / 1000)} s`);
           versionCheckTimer = setTimeout(() => {
             versionCheckTimer = undefined;
             if (connections.get(LOCAL_ID) === c && c.state !== "connected") void restartLocalDaemon(true);
           }, freshMs + 100);
           return;
         }
-        appendLog(`[${LOCAL_ID}] local daemon speaks another protocol, restarting`);
+        appendLog(`[${LOCAL_ID}] local daemon speaks an older protocol, restarting`);
         void restartLocalDaemon(true);
       });
   };

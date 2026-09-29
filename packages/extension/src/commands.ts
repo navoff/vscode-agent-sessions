@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { AgentKind, SessionInfo } from "@agent-sessions/core";
+import { isValidSessionId, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
 import type { TreeNode } from "./tree/treeModel.js";
 
@@ -124,11 +124,17 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     const s = sessionOf(node);
     if (!s || !checkSessionId(s.session.id)) return;
     const { machineId, session } = s;
+    // The daemon only deletes UUID ids; say so here instead of after the round trip.
+    if (!isValidSessionId(session.id)) {
+      void vscode.window.showErrorMessage(`Cannot delete "${session.title}": its id ${JSON.stringify(session.id.slice(0, 80))} is not a session UUID.`);
+      return;
+    }
     if (session.status === "running") {
       void vscode.window.showWarningMessage(`"${session.title}" is running. Wait until it finishes or stop it before deleting.`);
       return;
     }
-    const pick = await vscode.window.showWarningMessage(`Delete "${session.title}" permanently? This cannot be undone.`, { modal: true }, "Delete");
+    const closeFirst = session.agent === "codex" ? " Close the session in Codex first if it is open." : "";
+    const pick = await vscode.window.showWarningMessage(`Delete "${session.title}" permanently? This cannot be undone.${closeFirst}`, { modal: true }, "Delete");
     if (pick !== "Delete") return;
     try {
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Deleting "${session.title}"` }, () =>

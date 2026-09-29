@@ -17,7 +17,7 @@ export interface LineClientOptions {
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
   helloTimeoutMs?: number;
-  /** How long a delete request may wait for its "deleteResult". Default 30 s. */
+  /** How long a delete request may wait for its "deleteResult". Default 45 s, longer than the daemon's 30 s limit on `codex delete`. */
   requestTimeoutMs?: number;
 }
 
@@ -51,7 +51,7 @@ export class LineClient {
     this.pingIntervalMs = opts.pingIntervalMs ?? 10_000;
     this.pongTimeoutMs = opts.pongTimeoutMs ?? 10_000;
     this.helloTimeoutMs = opts.helloTimeoutMs ?? 15_000;
-    this.requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? 45_000;
     this.input.on("error", this.onInputError);
     this.output.on("error", this.onOutputError);
     this.rl = createInterface({ input: this.input });
@@ -84,7 +84,7 @@ export class LineClient {
     const done = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error(`no answer from the daemon within ${Math.round(this.requestTimeoutMs / 1000)} s`));
+        reject(new Error(`no answer within ${Math.round(this.requestTimeoutMs / 1000)} s; the deletion may still complete`));
       }, this.requestTimeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
     });

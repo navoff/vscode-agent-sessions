@@ -172,7 +172,7 @@ test("deleteSession matches answers by request id and rejects with the daemon's 
 test("deleteSession rejects on timeout, on close and when already closed", async () => {
   const h = connected({ requestTimeoutMs: 20 });
   await tick(5);
-  await assert.rejects(h.client.deleteSession("codex", "u1"), /no answer from the daemon/);
+  await assert.rejects(h.client.deleteSession("codex", "u1"), /no answer within 0 s; the deletion may still complete/);
   const pending = h.client.deleteSession("codex", "u2");
   h.fromDaemon.end();
   await assert.rejects(pending, /connection closed/);
