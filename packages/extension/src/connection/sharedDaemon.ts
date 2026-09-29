@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { openSync, closeSync, readFileSync } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export interface SharedDaemonPaths {
@@ -217,6 +218,9 @@ export async function spawnDetachedDaemon(
   try {
     const child = spawn(process.execPath, [daemonPath, "--listen", socketPath], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      // Not the window's workspace: the daemon outlives the window and must not
+      // pin its directory (a mount that should be unmounted, a deleted dir).
+      cwd: homedir(),
       detached: true,
       stdio: ["ignore", fd, fd],
     });
