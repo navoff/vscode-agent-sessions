@@ -2,7 +2,8 @@ import * as vscode from "vscode";
 import { isValidSessionId, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
 import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState } from "./tree/filterPicker.js";
-import type { TreeNode } from "./tree/treeModel.js";
+import type { SessionNode, TreeNode } from "./tree/treeModel.js";
+import { selectionTargets } from "./tree/selection.js";
 
 export type { FilterState };
 
@@ -77,16 +78,20 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
 export function registerSessionCommands(context: vscode.ExtensionContext, deps: CommandDeps): void {
   const reg = (id: string, fn: (node?: TreeNode) => unknown) =>
     context.subscriptions.push(vscode.commands.registerCommand(id, (node?: TreeNode) => fn(node)));
+  // Multi-select aware: VS Code passes the clicked node and the selection.
+  const regMulti = (id: string, fn: (targets: SessionNode[]) => unknown) =>
+    context.subscriptions.push(
+      vscode.commands.registerCommand(id, (node?: TreeNode, selected?: TreeNode[]) => fn(selectionTargets(node, selected))),
+    );
 
   reg("agentSessions.openSession", async (node) => {
     const s = sessionOf(node);
     if (s) await openSession(deps, s.machineId, s.session);
   });
-  reg("agentSessions.markRead", (node) => {
-    const s = sessionOf(node);
-    if (!s) return;
-    deps.store.markRead(s.machineId, s.session, Date.now());
-    deps.refresh();
+  regMulti("agentSessions.markRead", (targets) => {
+    const now = Date.now();
+    for (const n of targets) deps.store.markRead(n.machineId, n.row.session, now);
+    if (targets.length > 0) deps.refresh();
   });
   reg("agentSessions.markUnread", (node) => {
     const s = sessionOf(node);
@@ -94,11 +99,9 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     deps.store.markUnread(s.machineId, s.session);
     deps.refresh();
   });
-  reg("agentSessions.hideSession", (node) => {
-    const s = sessionOf(node);
-    if (!s) return;
-    deps.store.setHidden(s.machineId, s.session, true);
-    deps.refresh();
+  regMulti("agentSessions.hideSession", (targets) => {
+    for (const n of targets) deps.store.setHidden(n.machineId, n.row.session, true);
+    if (targets.length > 0) deps.refresh();
   });
   reg("agentSessions.unhideSession", (node) => {
     const s = sessionOf(node);
@@ -118,34 +121,46 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     term.show();
     term.sendText(cmd, false);
   });
-  reg("agentSessions.deleteSession", async (node) => {
-    const s = sessionOf(node);
-    if (!s || !checkSessionId(s.session.id)) return;
-    const { machineId, session } = s;
-    // The daemon only deletes UUID ids; say so here instead of after the round trip.
-    if (!isValidSessionId(session.id)) {
-      void vscode.window.showErrorMessage(`Cannot delete "${session.title}": its id ${JSON.stringify(session.id.slice(0, 80))} is not a session UUID.`);
-      return;
-    }
-    if (session.status === "running") {
-      void vscode.window.showWarningMessage(`"${session.title}" is running. Wait until it finishes or stop it before deleting.`);
-      return;
-    }
-    const closeFirst = session.agent === "codex" ? " Close the session in Codex first if it is open." : "";
-    const pick = await vscode.window.showWarningMessage(`Delete "${session.title}" permanently? This cannot be undone.${closeFirst}`, { modal: true }, "Delete");
+  regMulti("agentSessions.deleteSession", async (targets) => {
+    const skipped: string[] = [];
+    const candidates = targets.filter((n) => {
+      const { session } = n.row;
+      // The daemon only deletes UUID ids; say so here instead of after the round trip.
+      if (!isValidSessionId(session.id)) {
+        skipped.push(`"${session.title}": id is not a session UUID`);
+        return false;
+      }
+      if (session.status === "running") {
+        skipped.push(`"${session.title}": running`);
+        return false;
+      }
+      return true;
+    });
+    if (skipped.length > 0) void vscode.window.showWarningMessage(`Skipped: ${skipped.join("; ")}`);
+    if (candidates.length === 0) return;
+    const titles = candidates.map((n) => `"${n.row.session.title}"`);
+    const shown = titles.length > 5 ? `${titles.slice(0, 5).join(", ")} and ${titles.length - 5} more` : titles.join(", ");
+    const closeFirst = candidates.some((n) => n.row.session.agent === "codex") ? " Close Codex sessions first if they are open." : "";
+    const what = candidates.length === 1 ? `Delete ${shown} permanently?` : `Delete ${candidates.length} sessions permanently? ${shown}.`;
+    const pick = await vscode.window.showWarningMessage(`${what} This cannot be undone.${closeFirst}`, { modal: true }, "Delete");
     if (pick !== "Delete") return;
-    try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Deleting "${session.title}"` }, () =>
-        deps.deleteSession(machineId, session.agent, session.id),
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      deps.log.appendLine(`[${machineId}] delete ${session.agent}:${session.id} failed: ${msg}`);
-      void vscode.window.showErrorMessage(`Cannot delete "${session.title}": ${msg}`);
-      return;
-    }
-    deps.log.appendLine(`[${machineId}] deleted ${session.agent}:${session.id}`);
-    deps.store.forget(machineId, session);
+    const failed: string[] = [];
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: candidates.length === 1 ? `Deleting ${shown}` : `Deleting ${candidates.length} sessions` }, async () => {
+      for (const n of candidates) {
+        const { machineId } = n;
+        const { session } = n.row;
+        try {
+          await deps.deleteSession(machineId, session.agent, session.id);
+          deps.log.appendLine(`[${machineId}] deleted ${session.agent}:${session.id}`);
+          deps.store.forget(machineId, session);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          deps.log.appendLine(`[${machineId}] delete ${session.agent}:${session.id} failed: ${msg}`);
+          failed.push(`"${session.title}": ${msg}`);
+        }
+      }
+    });
+    if (failed.length > 0) void vscode.window.showErrorMessage(`Could not delete ${failed.join("; ")}`);
     deps.refresh();
   });
   reg("agentSessions.refresh", () => deps.refresh());

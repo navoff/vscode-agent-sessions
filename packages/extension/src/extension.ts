@@ -102,7 +102,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.Uri.joinPath(context.extensionUri, "resources"),
     homedir(),
   );
-  context.subscriptions.push(tree, vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true }));
+  context.subscriptions.push(tree, vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true }));
   const refresh = () => tree.refresh();
 
   const makeConnection = (id: string): MachineConnection | undefined => {
