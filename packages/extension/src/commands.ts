@@ -58,9 +58,29 @@ async function openCodexThread(sessionId: string): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse(`vscode://openai.chatgpt/local/${encodeURIComponent(sessionId)}`));
 }
 
-async function offerInstall(extensionId: string, name: string): Promise<void> {
+/** Resolves once `extensionId` is installed, or false after `timeoutMs`. */
+function waitForExtension(extensionId: string, timeoutMs: number): Promise<boolean> {
+  if (vscode.extensions.getExtension(extensionId)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => { clearTimeout(timer); sub.dispose(); resolve(ok); };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    const sub = vscode.extensions.onDidChange(() => { if (vscode.extensions.getExtension(extensionId)) done(true); });
+  });
+}
+
+/** Offers to install `extensionId`; true once it is installed and the caller can go on. */
+async function offerInstall(extensionId: string, name: string): Promise<boolean> {
   const pick = await vscode.window.showErrorMessage(`${name} extension is not installed.`, "Install");
-  if (pick === "Install") await vscode.commands.executeCommand("workbench.extensions.installExtension", extensionId);
+  if (pick !== "Install") return false;
+  try {
+    await vscode.commands.executeCommand("workbench.extensions.installExtension", extensionId);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Installing ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+  if (await waitForExtension(extensionId, 30_000)) return true;
+  void vscode.window.showWarningMessage(`${name} did not become available; open the session again once it is installed.`);
+  return false;
 }
 
 function resumeInTerminal(session: SessionInfo): void {
@@ -122,12 +142,12 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
   if (machineId !== "local") return openRemoteSession(deps, machineId, session);
   if (!checkSessionId(session.id)) return;
   if (session.agent === "claude") {
-    if (!vscode.extensions.getExtension(CLAUDE_EXTENSION)) return offerInstall(CLAUDE_EXTENSION, "Claude Code");
+    if (!vscode.extensions.getExtension(CLAUDE_EXTENSION) && !(await offerInstall(CLAUDE_EXTENSION, "Claude Code"))) return;
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
     if (!(await claudeFindsSession(session.cwd, folders))) return offerClaudeFolder(deps, session);
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
-    if (!vscode.extensions.getExtension(CODEX_EXTENSION)) return offerInstall(CODEX_EXTENSION, "Codex");
+    if (!vscode.extensions.getExtension(CODEX_EXTENSION) && !(await offerInstall(CODEX_EXTENSION, "Codex"))) return;
     await openCodexThread(session.id);
   } else {
     void vscode.window.showInformationMessage(`Opening ${session.agent} sessions is not supported yet.`);

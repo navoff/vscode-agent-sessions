@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-09-29
+
+- Opening a session whose agent extension is missing installs it on request
+  and then opens the session, instead of stopping after the install.
+
 ## 0.1.1 - 2026-09-29
 
 - Remote sessions open in a Remote-SSH window on their folder. The daemon
