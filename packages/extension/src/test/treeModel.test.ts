@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { SessionInfo } from "@agent-sessions/core";
-import { buildTree, relativeTime, sessionContextValue, sessionDescription, sessionIconName, shortenCwd, type MachineInput } from "../tree/treeModel.js";
+import { buildTree, projectContextValue, relativeTime, sessionContextValue, sessionDescription, sessionIconName, shortenCwd, type MachineInput } from "../tree/treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 const s = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/home/u/work/a", createdAt: 1, updatedAt: 1000, status: "idle", ...over });
@@ -162,4 +162,29 @@ test("workspaceOnly has no effect without workspace folders", () => {
   ]);
   const tree = buildTree([local], rows, { agents: undefined, showRemote: true, workspaceOnly: true, showHidden: false }, { home: "/home/u", workspaceFolders: [] });
   assert.equal(tree[0].projects.length, 2);
+});
+
+test("a hidden folder is dropped whole unless showHidden, and its sessions keep their own marks", () => {
+  const rows = new Map<string, SessionRow[]>([
+    ["local", [
+      row("local", s("a", { cwd: "/home/u/work/a" }), { hidden: true }),
+      row("local", s("b", { cwd: "/home/u/work/a" }), { unread: true }),
+      row("local", s("c", { cwd: "/home/u/work/c" })),
+    ]],
+  ]);
+  const isProjectHidden = (machineId: string, cwd: string) => machineId === "local" && cwd === "/home/u/work/a";
+  const filter = { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false };
+  const tree = buildTree([local], rows, filter, { ...opts, isProjectHidden });
+  assert.deepEqual(tree[0].projects.map((p) => p.label), ["~/work/c"]);
+  assert.equal(projectContextValue(tree[0].projects[0]), "project:visible:read");
+
+  const shown = buildTree([local], rows, { ...filter, showHidden: true }, { ...opts, isProjectHidden });
+  const a = shown[0].projects.find((p) => p.cwd === "/home/u/work/a")!;
+  assert.equal(a.hidden, true);
+  assert.equal(a.unread, true);
+  assert.equal(projectContextValue(a), "project:hidden:unread");
+  assert.deepEqual(a.sessions.map((n) => [n.row.session.id, n.row.hidden]), [["a", true], ["b", false]]);
+
+  // Without the callback nothing is hidden.
+  assert.equal(buildTree([local], rows, filter, opts)[0].projects.length, 2);
 });

@@ -29,6 +29,10 @@ export interface ProjectNode {
   machineId: string;
   cwd: string;
   label: string;
+  /** Hidden as a whole; see SessionMarks.isProjectHidden. */
+  hidden: boolean;
+  /** Any shown session is unread. */
+  unread: boolean;
   sessions: SessionNode[];
 }
 
@@ -43,6 +47,7 @@ export type TreeNode = MachineNode | ProjectNode | SessionNode;
 export interface BuildOptions {
   home: string;
   workspaceFolders: string[];
+  isProjectHidden?: (machineId: string, cwd: string) => boolean;
 }
 
 export function shortenCwd(cwd: string, home: string): string {
@@ -92,6 +97,14 @@ export function sessionContextValue(row: SessionRow): string {
   ].join(":");
 }
 
+/**
+ * The folder's contextValue, matched by the `when` clauses in package.json:
+ * `project:<hidden|visible>:<unread|read>`.
+ */
+export function projectContextValue(node: ProjectNode): string {
+  return ["project", node.hidden ? "hidden" : "visible", node.unread ? "unread" : "read"].join(":");
+}
+
 function sortRows(rows: SessionRow[]): SessionRow[] {
   return [...rows].sort((a, b) => {
     const ar = a.session.status === "running" ? 0 : 1;
@@ -132,13 +145,20 @@ export function buildTree(
       list.push(r);
       byCwd.set(r.session.cwd, list);
     }
-    const projects: ProjectNode[] = [...byCwd.entries()].map(([cwd, list]) => ({
-      kind: "project",
-      machineId: machine.id,
-      cwd,
-      label: shortenCwd(cwd, machine.isLocal ? opts.home : machine.home ?? ""),
-      sessions: sortRows(list).map((row) => ({ kind: "session", machineId: machine.id, row })),
-    }));
+    const projects: ProjectNode[] = [];
+    for (const [cwd, list] of byCwd) {
+      const hidden = opts.isProjectHidden?.(machine.id, cwd) ?? false;
+      if (hidden && !filter.showHidden) continue;
+      projects.push({
+        kind: "project",
+        machineId: machine.id,
+        cwd,
+        label: shortenCwd(cwd, machine.isLocal ? opts.home : machine.home ?? ""),
+        hidden,
+        unread: list.some((r) => r.unread),
+        sessions: sortRows(list).map((row) => ({ kind: "session", machineId: machine.id, row })),
+      });
+    }
     projects.sort((a, b) => {
       const aw = machine.isLocal && isWorkspace(a.cwd, opts.workspaceFolders) ? 0 : 1;
       const bw = machine.isLocal && isWorkspace(b.cwd, opts.workspaceFolders) ? 0 : 1;

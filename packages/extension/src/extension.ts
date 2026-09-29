@@ -99,6 +99,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       rows: () => new Map<string, SessionRow[]>(store.machineIds().map((id) => [id, store.rows(id)])),
       filter: () => ({ agents: filter.agents ? new Set<AgentKind>(filter.agents) : undefined, showRemote: filter.showRemote, workspaceOnly: filter.workspaceOnly, showHidden: cfg().get<boolean>("showHidden", false) }),
       machineEnabled: (id) => machines.machines.find((m) => m.id === id)?.enabled ?? true,
+      isProjectHidden: (id, cwd) => store.isProjectHidden(id, cwd),
     },
     vscode.Uri.joinPath(context.extensionUri, "resources"),
     homedir(),
