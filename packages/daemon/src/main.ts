@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
-import { readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -56,42 +56,65 @@ export function main(argv: string[]): void {
       process.stderr.write("usage: daemon.mjs --listen <socket path>\n");
       process.exit(2);
     }
+    const pidFile = join(dirname(socketPath), "daemon.pid");
+    let previousPid: string | undefined;
+    // Removes the pid file unless a successor has already replaced it.
+    const removePidFile = () => {
+      try {
+        if (readFileSync(pidFile, "utf8").trim() === String(process.pid)) unlinkSync(pidFile);
+      } catch {
+        // already gone
+      }
+    };
+    let server: SocketServer | undefined;
+    let stopped = false;
+    const daemon = new Daemon({
+      providers,
+      version,
+      home,
+      log,
+      onStop: () => {
+        stopped = true;
+        removePidFile();
+        server?.finish();
+      },
+    });
     void (async () => {
       await ensurePrivateDir(dirname(socketPath));
       await removeStaleSocket(socketPath);
-      const pidFile = join(dirname(socketPath), "daemon.pid");
-      // Removes the pid file unless a successor has already replaced it.
-      const removePidFile = () => {
-        try {
-          if (readFileSync(pidFile, "utf8").trim() === String(process.pid)) unlinkSync(pidFile);
-        } catch {
-          // already gone
-        }
-      };
-      let server!: SocketServer;
-      const daemon = new Daemon({
-        providers,
-        version,
-        home,
-        log,
-        onStop: () => {
-          removePidFile();
-          server.finish();
-        },
-      });
-      server = await serveOnSocket(daemon, socketPath, { idleTimeoutMs: IDLE_TIMEOUT_MS, log });
-      // The extension's restart command kills this pid when the daemon does
-      // not exit on "shutdown" (a hung event loop).
+      // Written before listening, and the signal handlers installed, so the
+      // extension's restart command can SIGTERM (or SIGKILL) a daemon that
+      // hangs during startup as well.
+      try {
+        previousPid = readFileSync(pidFile, "utf8");
+      } catch {
+        // no previous daemon
+      }
       await writeFile(pidFile, String(process.pid));
-      // Read by the extension before an automatic restart, see daemonFreshForMs.
-      await writeFile(join(dirname(socketPath), "daemon.version"), version);
-      log(`listening on ${socketPath} (version ${version}, pid ${process.pid})`);
       process.on("SIGTERM", () => daemon.stop("SIGTERM"));
       process.on("SIGINT", () => daemon.stop("SIGINT"));
+      server = await serveOnSocket(daemon, socketPath, { idleTimeoutMs: IDLE_TIMEOUT_MS, log });
+      if (stopped) {
+        // Stopped by a signal while binding: onStop already removed the pid file.
+        server.finish();
+      } else {
+        // Read by the extension before an automatic restart, see daemonFreshForMs.
+        await writeFile(join(dirname(socketPath), "daemon.version"), version);
+        log(`listening on ${socketPath} (version ${version}, pid ${process.pid})`);
+      }
       await server.close();
       process.exit(0);
     })().catch((err) => {
       log(`listen failed: ${String(err)}`);
+      // A live daemon may own the socket (EADDRINUSE): give it its pid file back.
+      try {
+        if (readFileSync(pidFile, "utf8").trim() === String(process.pid)) {
+          if (previousPid !== undefined) writeFileSync(pidFile, previousPid);
+          else unlinkSync(pidFile);
+        }
+      } catch {
+        // pid file never written
+      }
       process.exit(1);
     });
     return;

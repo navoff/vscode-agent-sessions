@@ -24,20 +24,30 @@ export interface SocketServer {
   close(): Promise<void>;
 }
 
+/** What ensurePrivateDir does with a directory, given its lstat and our uid. */
+export function isPrivateDir(st: { mode: number; uid: number; isDirectory(): boolean }, uid: number | undefined): "ok" | "narrow" | "refuse" {
+  if (!st.isDirectory()) return "refuse";
+  if (uid !== undefined && st.uid !== uid) return "refuse";
+  return (st.mode & 0o077) !== 0 ? "narrow" : "ok";
+}
+
 /**
- * Creates `dir` as 0700 and refuses it unless it is a real directory owned by
- * the current user and not writable by group or others: otherwise another
- * user could plant the socket, the pid file or a symlink at the log. A
- * directory created 0755 by an older version is narrowed to 0700.
+ * Creates `dir` as 0700 and refuses it unless it is a real directory (not a
+ * symlink) owned by the current user: otherwise another user could plant the
+ * socket, the pid file or a symlink at the log. Our own directory with wider
+ * permissions (such as 0775, created by an older version under umask 002) is
+ * narrowed to 0700.
  */
 export async function ensurePrivateDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
-  const st = await lstat(dir);
   const uid = process.getuid?.();
-  if (!st.isDirectory() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o022) !== 0) {
-    throw new Error(`unsafe socket directory ${dir}: it must be a directory owned by the current user and not writable by group or others`);
+  const unsafe = () => new Error(`unsafe socket directory ${dir}: it must be a directory owned by the current user with mode 0700`);
+  let verdict = isPrivateDir(await lstat(dir), uid);
+  if (verdict === "narrow") {
+    await chmod(dir, 0o700);
+    verdict = isPrivateDir(await lstat(dir), uid);
   }
-  if ((st.mode & 0o077) !== 0) await chmod(dir, 0o700);
+  if (verdict !== "ok") throw unsafe();
 }
 
 /** Deletes `path` when nothing listens on it. A live socket is left alone. */

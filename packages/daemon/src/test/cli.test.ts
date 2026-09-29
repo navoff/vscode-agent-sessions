@@ -111,3 +111,17 @@ test("--listen exits on SIGTERM and removes its socket and pid file", async () =
   await assert.rejects(stat(pidFile));
   await assert.rejects(stat(sock));
 });
+
+test("--listen on a live socket fails and leaves the live daemon's pid file alone", async () => {
+  const home = await mkdtemp(join(tmpdir(), "home-"));
+  const sock = join(home, "d.sock");
+  const { createServer } = await import("node:net");
+  const live = createServer();
+  await new Promise<void>((r) => live.listen(sock, () => r()));
+  await writeFile(join(home, "daemon.pid"), "12345");
+  const r = await run(["--listen", sock], { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") });
+  live.close();
+  assert.equal(r.code, 1);
+  assert.match(r.err, /listen failed/);
+  assert.equal(await readFile(join(home, "daemon.pid"), "utf8"), "12345");
+});

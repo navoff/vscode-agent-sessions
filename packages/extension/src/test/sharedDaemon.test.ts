@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:net";
-import { chmod, mkdtemp, readFile, writeFile, utimes, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile, utimes, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, daemonProcessAlive, ensurePrivateDir, ensureSharedDaemon, readDaemonPid, rotateLog, stopDaemonProcess, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
+import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, daemonProcessAlive, ensurePrivateDir, ensureSharedDaemon, isPrivateDir, readDaemonPid, rotateLog, stopDaemonProcess, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
 
 test("socketDir prefers XDG_RUNTIME_DIR and falls back to home", () => {
   assert.equal(socketDir({ XDG_RUNTIME_DIR: "/run/user/1" }, "/home/u"), "/run/user/1/agent-sessions");
@@ -246,31 +246,39 @@ test("daemonProcessAlive rejects dead pids and processes that are not the daemon
   assert.equal(daemonProcessAlive(process.pid), process.platform !== "linux");
 });
 
-test("ensureSharedDaemon refuses a socket directory writable by others", async (t) => {
-  if (process.getuid?.() === 0) {
-    t.skip("the check is about other users; skip as root");
-    return;
-  }
-  const dir = await mkdtemp(join(tmpdir(), "as-unsafe-"));
-  await chmod(dir, 0o777);
+test("ensureSharedDaemon refuses a symlinked socket directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "as-unsafe-"));
+  await mkdir(join(root, "real"));
+  await symlink(join(root, "real"), join(root, "link"));
   let spawned = 0;
   await assert.rejects(
-    () => ensureSharedDaemon({ paths: sharedDaemonPaths(dir), retryMs: 20, connectTimeoutMs: 150, spawnDaemon: () => { spawned++; }, log: () => {} }),
+    () => ensureSharedDaemon({ paths: sharedDaemonPaths(join(root, "link")), retryMs: 20, connectTimeoutMs: 150, spawnDaemon: () => { spawned++; }, log: () => {} }),
     /unsafe socket directory/,
   );
   assert.equal(spawned, 0);
 });
 
-test("ensurePrivateDir creates 0700 directories and narrows an existing 0755 one", async () => {
+test("ensurePrivateDir creates 0700 directories and narrows inherited 0775 and 0777 ones", async () => {
   const root = await mkdtemp(join(tmpdir(), "as-private-"));
   const fresh = join(root, "a", "agent-sessions");
   await ensurePrivateDir(fresh);
   assert.equal((await stat(fresh)).mode & 0o777, 0o700);
-  const old = join(root, "old");
-  await ensurePrivateDir(old);
-  await chmod(old, 0o755);
-  await ensurePrivateDir(old);
-  assert.equal((await stat(old)).mode & 0o777, 0o700);
+  for (const mode of [0o775, 0o777]) {
+    const old = join(root, `old-${mode.toString(8)}`);
+    await mkdir(old);
+    await chmod(old, mode);
+    await ensurePrivateDir(old);
+    assert.equal((await stat(old)).mode & 0o777, 0o700);
+  }
+});
+
+test("isPrivateDir accepts, narrows or refuses", () => {
+  const st = (mode: number, uid: number, dir = true) => ({ mode, uid, isDirectory: () => dir });
+  assert.equal(isPrivateDir(st(0o40700, 1000), 1000), "ok");
+  assert.equal(isPrivateDir(st(0o40775, 1000), 1000), "narrow");
+  assert.equal(isPrivateDir(st(0o40700, 0), 1000), "refuse", "another user's directory");
+  assert.equal(isPrivateDir(st(0o120777, 1000, false), 1000), "refuse", "symlink");
+  assert.equal(isPrivateDir(st(0o40777, 0), undefined), "narrow", "no getuid on this platform");
 });
 
 test("rotateLog moves a log over the limit to .1 and keeps a small one", async () => {

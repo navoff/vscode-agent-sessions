@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { connect, type Socket } from "node:net";
 import { createInterface } from "node:readline";
-import { chmod, mkdtemp, writeFile, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, symlink, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionInfo, SessionProvider } from "@agent-sessions/core";
 import { Daemon } from "../daemon.js";
-import { ensurePrivateDir, removeStaleSocket, serveOnSocket, type SocketServer } from "../server.js";
+import { ensurePrivateDir, isPrivateDir, removeStaleSocket, serveOnSocket, type SocketServer } from "../server.js";
 
 class FakeProvider implements SessionProvider {
   readonly agent = "claude" as const;
@@ -193,14 +193,25 @@ test("serveOnSocket rejects a socket path that is too long", async () => {
   daemon.stop();
 });
 
-test("ensurePrivateDir creates a 0700 directory and refuses one writable by others", async (t) => {
+test("ensurePrivateDir narrows an inherited directory and refuses a symlink", async () => {
   const root = await mkdtemp(join(tmpdir(), "as-private-"));
   await ensurePrivateDir(join(root, "sock"));
   assert.equal((await stat(join(root, "sock"))).mode & 0o777, 0o700);
-  if (process.getuid?.() === 0) {
-    t.skip("the check is about other users; skip as root");
-    return;
+  for (const mode of [0o775, 0o777]) {
+    const old = join(root, `old-${mode.toString(8)}`);
+    await mkdir(old);
+    await chmod(old, mode);
+    await ensurePrivateDir(old);
+    assert.equal((await stat(old)).mode & 0o777, 0o700);
   }
-  await chmod(root, 0o777);
-  await assert.rejects(ensurePrivateDir(root), /unsafe socket directory/);
+  await symlink(join(root, "sock"), join(root, "link"));
+  await assert.rejects(ensurePrivateDir(join(root, "link")), /unsafe socket directory/);
+});
+
+test("isPrivateDir accepts, narrows or refuses", () => {
+  const st = (mode: number, uid: number, dir = true) => ({ mode, uid, isDirectory: () => dir });
+  assert.equal(isPrivateDir(st(0o40700, 1000), 1000), "ok");
+  assert.equal(isPrivateDir(st(0o40777, 1000), 1000), "narrow");
+  assert.equal(isPrivateDir(st(0o40700, 0), 1000), "refuse");
+  assert.equal(isPrivateDir(st(0o120777, 1000, false), 1000), "refuse");
 });
