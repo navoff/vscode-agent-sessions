@@ -105,6 +105,8 @@ function timestampOf(line: string): number | undefined {
 interface TailScan {
   status?: string;
   activityAt?: number;
+  /** Last event of any kind except thread_settings_applied: shows the agent loop is alive. */
+  lastEventAt?: number;
 }
 
 /** Last task event and last activity timestamp within one block of complete lines. */
@@ -112,6 +114,7 @@ function scanTail(text: string): TailScan {
   const out: TailScan = {};
   for (const line of text.split("\n")) {
     if (line.includes('"event_msg"')) {
+      if (!line.includes('"thread_settings_applied"')) out.lastEventAt = timestampOf(line) ?? out.lastEventAt;
       const m = STATUS_EVENT.exec(line);
       if (m) {
         out.status = m[1];
@@ -135,12 +138,20 @@ export function statusFromTail(tail: string): SessionStatus {
 // Reads the file backwards in 64 KB chunks until a chunk holds a task event.
 // The partial first line of each chunk is carried over to the next (earlier)
 // chunk. The scan stops after TAIL_MAX_BYTES to bound the cost on huge files.
-export async function readTailBackwards(fh: FileHandle, size: number): Promise<{ status: SessionStatus; activityAt?: number }> {
+/** A turn that has written nothing for this long is treated as abandoned, not running. */
+export const STALE_RUNNING_MS = 30 * 60 * 1000;
+
+export async function readTailBackwards(
+  fh: FileHandle,
+  size: number,
+  now: number = Date.now(),
+): Promise<{ status: SessionStatus; activityAt?: number }> {
   const limit = Math.max(0, size - TAIL_MAX_BYTES);
   let end = size;
   let carry = Buffer.alloc(0);
   let status: string | undefined;
   let activityAt: number | undefined;
+  let lastEventAt: number | undefined;
   while (end > limit && (status === undefined || activityAt === undefined)) {
     const start = Math.max(limit, end - TAIL_CHUNK_BYTES);
     const chunk = Buffer.alloc(end - start);
@@ -164,15 +175,17 @@ export async function readTailBackwards(fh: FileHandle, size: number): Promise<{
     // Chunks are visited from the end, so the first hit is the latest one.
     if (status === undefined && scan.status !== undefined) status = scan.status;
     if (activityAt === undefined && scan.activityAt !== undefined) activityAt = scan.activityAt;
+    if (lastEventAt === undefined && scan.lastEventAt !== undefined) lastEventAt = scan.lastEventAt;
   }
-  return { status: status === "task_started" ? "running" : "idle", activityAt };
+  const alive = lastEventAt === undefined || now - lastEventAt < STALE_RUNNING_MS;
+  return { status: status === "task_started" && alive ? "running" : "idle", activityAt };
 }
 
 export async function readStatusBackwards(fh: FileHandle, size: number): Promise<SessionStatus> {
   return (await readTailBackwards(fh, size)).status;
 }
 
-export async function readRolloutInfo(filePath: string, size: number): Promise<CodexRolloutInfo | undefined> {
+export async function readRolloutInfo(filePath: string, size: number, now: number = Date.now()): Promise<CodexRolloutInfo | undefined> {
   const fh = await open(filePath, "r");
   try {
     const headLen = Math.min(size, HEAD_BYTES);
@@ -186,7 +199,7 @@ export async function readRolloutInfo(filePath: string, size: number): Promise<C
     const headLines = headText.split("\n");
     if (headLen < size) headLines.pop();
     const title = extractFirstPrompt(headLines);
-    const tail = await readTailBackwards(fh, size);
+    const tail = await readTailBackwards(fh, size, now);
     return { meta, title, status: tail.status, activityAt: tail.activityAt };
   } finally {
     await fh.close();

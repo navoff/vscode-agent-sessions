@@ -138,7 +138,7 @@ test("readRolloutInfo finds the activity time beyond 64 KB of bookkeeping", asyn
   await writeFile(file, lines.join("\n") + "\n");
   const size = (await stat(file)).size;
   assert.ok(size > 64 * 1024);
-  const info = await readRolloutInfo(file, size);
+  const info = await readRolloutInfo(file, size, Date.parse("2026-09-29T10:05:00.000Z"));
   assert.equal(info?.status, "running");
   assert.equal(info?.activityAt, Date.parse("2026-09-08T14:59:32.000Z"));
 });
@@ -149,4 +149,22 @@ test("readRolloutInfo leaves activityAt undefined without timestamps", async () 
   await writeFile(file, [meta({ id: "u3", thread_source: "user", cwd: "/w" }), userMsg("x"), event("task_complete")].join("\n") + "\n");
   const info = await readRolloutInfo(file, (await stat(file)).size);
   assert.equal(info?.activityAt, undefined);
+});
+
+test("an abandoned task_started older than 30 minutes is idle, a fresh one is running", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "codex-"));
+  const file = join(dir, "rollout-stale.jsonl");
+  const lines = [
+    meta({ id: "u4", thread_source: "user", cwd: "/w" }),
+    stampedUser("вопрос", "2026-09-08T14:59:31.546Z"),
+    stamped("task_started", "2026-09-08T14:59:32.000Z"),
+    stamped("item_completed", "2026-09-08T14:59:33.000Z"),
+    stamped("thread_settings_applied", "2026-09-29T10:37:44.229Z"),
+  ];
+  await writeFile(file, lines.join("\n") + "\n");
+  const size = (await stat(file)).size;
+  const weeksLater = Date.parse("2026-09-29T11:00:00.000Z");
+  assert.equal((await readRolloutInfo(file, size, weeksLater))?.status, "idle");
+  const minuteLater = Date.parse("2026-09-08T15:00:30.000Z");
+  assert.equal((await readRolloutInfo(file, size, minuteLater))?.status, "running");
 });
