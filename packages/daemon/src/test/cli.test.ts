@@ -5,6 +5,7 @@ import { chmod, mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PROTOCOL_VERSION } from "../protocol.js";
 
 const bundle = join(dirname(fileURLToPath(import.meta.url)), "..", "daemon.mjs");
 
@@ -45,7 +46,7 @@ test("stdio session answers hello and snapshot, exits on stdin close", async () 
     JSON.stringify({ type: "session_meta", payload: { id: "u1", timestamp: "2026-09-28T09:00:00.000Z", cwd: "/w", thread_source: "user" } }) + "\n",
   );
   const r = await run(["--stdio"], { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") },
-    '{"type":"hello","protocol":2}\n{"type":"snapshot"}\n');
+    `{"type":"hello","protocol":${PROTOCOL_VERSION}}\n{"type":"snapshot"}\n`);
   const lines = r.out.trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(lines[0].type, "hello");
   assert.equal(lines[1].type, "snapshot");
@@ -81,7 +82,7 @@ test("--listen serves a socket and exits on shutdown", async () => {
   }
   assert.ok(socket, "socket did not come up");
   const line = new Promise<string>((r) => { let buf = ""; socket!.on("data", (d) => { buf += d; const i = buf.indexOf("\n"); if (i >= 0) r(buf.slice(0, i)); }); });
-  socket.write('{"type":"hello","protocol":2}\n');
+  socket.write(`{"type":"hello","protocol":${PROTOCOL_VERSION}}\n`);
   const hello = JSON.parse(await line);
   assert.equal(hello.type, "hello");
   assert.match(hello.daemonVersion, /^\d+\.\d+\.\d+\+[0-9a-f]{12}$/);
@@ -156,7 +157,7 @@ test("stdio delete runs CODEX_BIN, answers deleteResult and then reports the rem
     waiter?.();
   });
   const until = async (pred: () => boolean) => { while (!pred()) await new Promise<void>((r) => (waiter = r)); };
-  child.stdin.write('{"type":"hello","protocol":2}\n{"type":"snapshot"}\n');
+  child.stdin.write(`{"type":"hello","protocol":${PROTOCOL_VERSION}}\n{"type":"snapshot"}\n`);
   await until(() => lines.some((l) => l.type === "snapshot"));
   child.stdin.write(`{"type":"delete","requestId":"r1","agent":"codex","id":"${CID}"}\n{"type":"delete","requestId":"r2","agent":"opencode","id":"x"}\n`);
   await until(() => lines.some((l) => l.type === "changed") && lines.filter((l) => l.type === "deleteResult").length === 2);

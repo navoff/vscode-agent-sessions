@@ -76,6 +76,16 @@ test("parse delete and deleteResult messages", () => {
   assert.equal(parseDaemonMessage('{"type":"deleteResult","ok":true}'), undefined);
 });
 
+test("parse pendingOpen and pendingOpenResult messages", () => {
+  const good = s("claude", "a");
+  assert.deepEqual(parseClientMessage(JSON.stringify({ type: "pendingOpen", requestId: "9", session: good })), { type: "pendingOpen", requestId: "9", session: good });
+  assert.equal(parseClientMessage(JSON.stringify({ type: "pendingOpen", session: good })), undefined);
+  assert.equal(parseClientMessage(JSON.stringify({ type: "pendingOpen", requestId: "9", session: { id: "a" } })), undefined);
+  assert.deepEqual(parseDaemonMessage('{"type":"pendingOpenResult","requestId":"9","ok":true}'), { type: "pendingOpenResult", requestId: "9", ok: true });
+  assert.deepEqual(parseDaemonMessage('{"type":"pendingOpenResult","requestId":"9","ok":false,"error":"no"}'), { type: "pendingOpenResult", requestId: "9", ok: false, error: "no" });
+  assert.equal(parseDaemonMessage('{"type":"pendingOpenResult","ok":true}'), undefined);
+});
+
 test("parseClientMessage reads hello with protocol and rejects non-JSON", () => {
   assert.deepEqual(parseClientMessage('{"type":"hello","protocol":1}'), { type: "hello", protocol: 1 });
   assert.equal(parseClientMessage('{"type":"hello"}'), undefined);

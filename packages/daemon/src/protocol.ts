@@ -1,7 +1,7 @@
 import type { AgentKind, SessionInfo } from "@agent-sessions/core";
 
-/** 2 added "delete" and "deleteResult". */
-export const PROTOCOL_VERSION = 2;
+/** 2 added "delete" and "deleteResult"; 3 added "pendingOpen" and "pendingOpenResult". */
+export const PROTOCOL_VERSION = 3;
 
 export type ClientMessage =
   | { type: "hello"; protocol: number }
@@ -9,7 +9,9 @@ export type ClientMessage =
   | { type: "ping" }
   | { type: "shutdown" }
   /** Permanently deletes a session; answered by "deleteResult" with the same requestId. */
-  | { type: "delete"; requestId: string; agent: string; id: string };
+  | { type: "delete"; requestId: string; agent: string; id: string }
+  /** Records a session for a window on its folder to open; answered by "pendingOpenResult". */
+  | { type: "pendingOpen"; requestId: string; session: SessionInfo };
 
 export interface HelloInfo {
   protocol: number;
@@ -24,6 +26,7 @@ export type DaemonMessage =
   | { type: "changed"; upserted: SessionInfo[]; removed: string[] }
   | { type: "pong" }
   | { type: "deleteResult"; requestId: string; ok: boolean; error?: string }
+  | { type: "pendingOpenResult"; requestId: string; ok: boolean; error?: string }
   | { type: "error"; message: string };
 
 export function parseClientMessage(line: string): ClientMessage | undefined {
@@ -47,6 +50,10 @@ export function parseClientMessage(line: string): ClientMessage | undefined {
     case "delete":
       return typeof r.requestId === "string" && typeof r.agent === "string" && typeof r.id === "string"
         ? { type: "delete", requestId: r.requestId, agent: r.agent, id: r.id }
+        : undefined;
+    case "pendingOpen":
+      return typeof r.requestId === "string" && isSessionInfo(r.session)
+        ? { type: "pendingOpen", requestId: r.requestId, session: r.session }
         : undefined;
     default:
       return undefined;
@@ -94,6 +101,12 @@ export function parseDaemonMessage(line: string): DaemonMessage | undefined {
     case "deleteResult": {
       if (typeof r.requestId !== "string" || typeof r.ok !== "boolean") return undefined;
       const msg: DaemonMessage = { type: "deleteResult", requestId: r.requestId, ok: r.ok };
+      if (typeof r.error === "string") msg.error = r.error;
+      return msg;
+    }
+    case "pendingOpenResult": {
+      if (typeof r.requestId !== "string" || typeof r.ok !== "boolean") return undefined;
+      const msg: DaemonMessage = { type: "pendingOpenResult", requestId: r.requestId, ok: r.ok };
       if (typeof r.error === "string") msg.error = r.error;
       return msg;
     }
