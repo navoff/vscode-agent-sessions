@@ -5,7 +5,8 @@ export const PROTOCOL_VERSION = 1;
 export type ClientMessage =
   | { type: "hello"; protocol: number }
   | { type: "snapshot" }
-  | { type: "ping" };
+  | { type: "ping" }
+  | { type: "shutdown" };
 
 export interface HelloInfo {
   protocol: number;
@@ -37,6 +38,8 @@ export function parseClientMessage(line: string): ClientMessage | undefined {
       return { type: "snapshot" };
     case "ping":
       return { type: "ping" };
+    case "shutdown":
+      return { type: "shutdown" };
     default:
       return undefined;
   }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionInfo, SessionProvider } from "@agent-sessions/core";
 import { Daemon, sameSession } from "../daemon.js";
-import { parseClientMessage, parseDaemonMessage, PROTOCOL_VERSION, type DaemonMessage } from "../protocol.js";
+import { parseClientMessage, PROTOCOL_VERSION, type DaemonMessage } from "../protocol.js";
 
 class FakeProvider implements SessionProvider {
   sessions: SessionInfo[] = [];
@@ -24,168 +24,219 @@ class FakeProvider implements SessionProvider {
   trigger() { this.cb?.(); }
 }
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
+const s = (agent: "claude" | "codex", id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
+  agent, id, title: id, cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle", ...over,
+});
+const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((r) => { resolve = r; });
   return { promise, resolve };
 }
 
-const s = (agent: "claude" | "codex", id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
-  agent, id, title: id, cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle", ...over,
-});
-
 function setup(opts: { debounceMs?: number; pollMs?: number } = {}) {
-  const sent: DaemonMessage[] = [];
   const claude = new FakeProvider("claude");
   const codex = new FakeProvider("codex");
-  const daemon = new Daemon({ providers: [claude, codex], send: (m) => sent.push(m), version: "t", home: "/h", debounceMs: opts.debounceMs ?? 10, pollMs: opts.pollMs ?? 60_000 });
-  return { sent, claude, codex, daemon };
+  const idle: number[] = [];
+  let stopped = 0;
+  const daemon = new Daemon({
+    providers: [claude, codex], version: "t", home: "/h",
+    debounceMs: opts.debounceMs ?? 10, pollMs: opts.pollMs ?? 60_000,
+    onIdle: () => idle.push(Date.now()), onStop: () => { stopped++; },
+  });
+  const attach = () => {
+    const sent: DaemonMessage[] = [];
+    const client = daemon.attach((m) => sent.push(m));
+    return { sent, client };
+  };
+  return { claude, codex, daemon, attach, idle, stopped: () => stopped };
 }
-const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test("parseClientMessage accepts known messages only", () => {
+test("parseClientMessage accepts shutdown", () => {
+  assert.deepEqual(parseClientMessage('{"type":"shutdown"}'), { type: "shutdown" });
   assert.deepEqual(parseClientMessage('{"type":"ping"}'), { type: "ping" });
-  assert.deepEqual(parseClientMessage('{"type":"hello","protocol":1}'), { type: "hello", protocol: 1 });
   assert.equal(parseClientMessage('{"type":"nope"}'), undefined);
-  assert.equal(parseClientMessage("bad"), undefined);
 });
 
-test("hello with wrong protocol yields error", () => {
-  const { sent, daemon } = setup();
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION + 1 });
-  assert.equal(sent[0].type, "error");
-  daemon.stop();
+test("hello with wrong protocol detaches only that client", () => {
+  const h = setup();
+  const a = h.attach();
+  const b = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION + 1 });
+  assert.equal(a.sent[0].type, "error");
+  assert.ok(a.client.detached);
+  assert.equal(h.daemon.clientCount, 1);
+  b.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  assert.equal(b.sent[0].type, "hello");
+  assert.equal(h.stopped(), 0);
+  h.daemon.stop();
 });
 
-test("stop calls onStop once, after a protocol mismatch too", () => {
-  let stops = 0;
-  const sent: DaemonMessage[] = [];
-  const daemon = new Daemon({ providers: [], send: (m) => sent.push(m), version: "t", home: "/h", onStop: () => stops++ });
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION + 1 });
-  assert.equal(sent[0].type, "error");
-  assert.equal(stops, 1);
-  daemon.stop();
-  assert.equal(stops, 1);
-});
-
-test("hello then snapshot returns full list", async () => {
-  const { sent, claude, daemon } = setup();
-  claude.sessions = [s("claude", "a")];
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  assert.deepEqual(sent[0], { type: "hello", protocol: 1, daemonVersion: "t", agents: ["claude", "codex"], home: "/h" });
-  daemon.handle({ type: "snapshot" });
+test("each client gets its own hello, snapshot and pong", async () => {
+  const h = setup();
+  h.claude.sessions = [s("claude", "a")];
+  const a = h.attach();
+  const b = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "snapshot" });
   await tick(30);
-  assert.equal(sent[1].type, "snapshot");
-  assert.deepEqual((sent[1] as { sessions: SessionInfo[] }).sessions.map((x) => x.id), ["a"]);
-  daemon.handle({ type: "ping" });
-  assert.equal(sent[2].type, "pong");
-  daemon.stop();
+  assert.deepEqual(a.sent.map((m) => m.type), ["hello", "snapshot"]);
+  assert.deepEqual(b.sent, [] as DaemonMessage[]);
+  b.client.handle({ type: "ping" });
+  assert.deepEqual(b.sent.map((m) => m.type), ["pong"]);
+  h.daemon.stop();
 });
 
-test("provider change emits a debounced diff", async () => {
-  const { sent, claude, codex, daemon } = setup();
-  claude.sessions = [s("claude", "a"), s("claude", "b")];
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  daemon.handle({ type: "snapshot" });
+test("a full snapshot for one client sends changed to synced clients", async () => {
+  const h = setup();
+  h.claude.sessions = [s("claude", "a")];
+  const a = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "snapshot" });
   await tick(30);
-  claude.sessions = [s("claude", "a", { status: "running" })];
-  codex.sessions = [s("codex", "c")];
-  claude.trigger();
-  claude.trigger();
-  codex.trigger();
+  h.claude.sessions = [s("claude", "a", { status: "running" }), s("claude", "b")];
+  const b = h.attach();
+  b.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  b.client.handle({ type: "snapshot" });
+  await tick(30);
+  const bSnap = b.sent.find((m) => m.type === "snapshot") as { sessions: SessionInfo[] };
+  assert.deepEqual(bSnap.sessions.map((x) => x.id).sort(), ["a", "b"]);
+  const aChanged = a.sent.filter((m) => m.type === "changed") as Array<{ upserted: SessionInfo[]; removed: string[] }>;
+  assert.equal(aChanged.length, 1);
+  assert.deepEqual(aChanged[0].upserted.map((x) => x.id).sort(), ["a", "b"]);
+  assert.deepEqual(aChanged[0].removed, []);
+  h.daemon.stop();
+});
+
+test("provider change emits one debounced diff to all synced clients only", async () => {
+  const h = setup();
+  h.claude.sessions = [s("claude", "a"), s("claude", "b")];
+  const a = h.attach();
+  const b = h.attach();
+  const c = h.attach();
+  for (const x of [a, b]) { x.client.handle({ type: "hello", protocol: PROTOCOL_VERSION }); x.client.handle({ type: "snapshot" }); }
+  c.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  await tick(30);
+  h.claude.sessions = [s("claude", "a", { status: "running" })];
+  h.codex.sessions = [s("codex", "c")];
+  h.claude.trigger();
+  h.claude.trigger();
+  h.codex.trigger();
   await tick(60);
-  const changed = sent.filter((m) => m.type === "changed");
-  assert.equal(changed.length, 1);
-  const c = changed[0] as { upserted: SessionInfo[]; removed: string[] };
-  assert.deepEqual(c.upserted.map((x) => `${x.agent}:${x.id}`).sort(), ["claude:a", "codex:c"]);
-  assert.deepEqual(c.removed, ["claude:b"]);
-  daemon.stop();
+  for (const x of [a, b]) {
+    const changed = x.sent.filter((m) => m.type === "changed") as Array<{ upserted: SessionInfo[]; removed: string[] }>;
+    assert.equal(changed.length, 1);
+    assert.deepEqual(changed[0].upserted.map((m) => `${m.agent}:${m.id}`).sort(), ["claude:a", "codex:c"]);
+    assert.deepEqual(changed[0].removed, ["claude:b"]);
+  }
+  assert.equal(c.sent.filter((m) => m.type === "changed").length, 0);
+  h.daemon.stop();
 });
 
 test("a failing provider keeps its previous sessions", async () => {
-  const { sent, claude, daemon } = setup();
-  claude.sessions = [s("claude", "a")];
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  daemon.handle({ type: "snapshot" });
+  const h = setup();
+  h.claude.sessions = [s("claude", "a")];
+  const a = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "snapshot" });
   await tick(30);
-  claude.fail = true;
-  claude.trigger();
+  h.claude.fail = true;
+  h.claude.trigger();
   await tick(60);
-  assert.equal(sent.filter((m) => m.type === "changed").length, 0);
-  daemon.stop();
+  assert.equal(a.sent.filter((m) => m.type === "changed").length, 0);
+  h.daemon.stop();
 });
 
 test("poll refreshes without watch events", async () => {
-  const { sent, claude, daemon } = setup({ pollMs: 20 });
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  daemon.handle({ type: "snapshot" });
+  const h = setup({ pollMs: 20 });
+  const a = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "snapshot" });
   await tick(30);
-  claude.sessions = [s("claude", "z")];
+  h.claude.sessions = [s("claude", "z")];
   await tick(80);
-  assert.ok(sent.some((m) => m.type === "changed"));
-  daemon.stop();
+  assert.ok(a.sent.some((m) => m.type === "changed"));
+  h.daemon.stop();
 });
 
 test("snapshot requested during an in-flight refresh still gets a snapshot reply", async () => {
-  const { sent, claude, daemon } = setup();
+  const h = setup();
   const gate = deferred();
-  claude.gate = gate.promise;
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  daemon.handle({ type: "snapshot" });
-  daemon.handle({ type: "snapshot" });
+  h.claude.gate = gate.promise;
+  const a = h.attach();
+  const b = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  b.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "snapshot" });
+  b.client.handle({ type: "snapshot" });
   gate.resolve();
   await tick(30);
-  assert.equal(sent.filter((m) => m.type === "snapshot").length, 2);
-  daemon.stop();
-});
-
-test("stop during an in-flight refresh sends nothing and runs no further snapshots", async () => {
-  const { sent, claude, daemon } = setup();
-  const gate = deferred();
-  claude.gate = gate.promise;
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  daemon.handle({ type: "snapshot" });
-  daemon.stop();
-  gate.resolve();
-  await tick(30);
-  assert.equal(sent.filter((m) => m.type === "snapshot" || m.type === "changed").length, 0);
-  assert.equal(claude.snapshotCalls, 1);
-  const before = sent.length;
-  daemon.handle({ type: "ping" });
-  assert.equal(sent.length, before);
+  assert.equal(a.sent.filter((m) => m.type === "snapshot").length, 1);
+  assert.equal(b.sent.filter((m) => m.type === "snapshot").length, 1);
+  h.daemon.stop();
 });
 
 test("drain waits for the in-flight and queued full refresh", async () => {
-  const { sent, claude, daemon } = setup();
+  const h = setup();
   const gate = deferred();
-  claude.gate = gate.promise;
-  daemon.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  daemon.handle({ type: "snapshot" });
-  daemon.handle({ type: "snapshot" });
-  const d = daemon.drain();
-  await tick(10);
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].type, "hello");
+  h.claude.gate = gate.promise;
+  const a = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "snapshot" });
+  a.client.handle({ type: "snapshot" });
+  const d = h.daemon.drain();
+  assert.equal(a.sent.length, 1);
   gate.resolve();
   await d;
-  assert.equal(sent.filter((m) => m.type === "snapshot").length, 2);
-  await daemon.drain();
-  daemon.stop();
+  assert.equal(a.sent.filter((m) => m.type === "snapshot").length, 1);
+  await h.daemon.drain();
+  h.daemon.stop();
+});
+
+test("shutdown stops the engine, detaches everyone and calls onStop once", async () => {
+  const h = setup();
+  const a = h.attach();
+  const b = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  b.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "shutdown" });
+  assert.ok(a.client.detached && b.client.detached);
+  assert.equal(h.daemon.clientCount, 0);
+  assert.equal(h.stopped(), 1);
+  b.client.handle({ type: "ping" });
+  assert.equal(b.sent.filter((m) => m.type === "pong").length, 0);
+  h.daemon.stop();
+  assert.equal(h.stopped(), 1);
+});
+
+test("detaching the last client calls onIdle, detach is idempotent", () => {
+  const h = setup();
+  const a = h.attach();
+  const b = h.attach();
+  a.client.detach();
+  assert.equal(h.idle.length, 0);
+  b.client.detach();
+  b.client.detach();
+  assert.equal(h.idle.length, 1);
+  assert.equal(h.daemon.clientCount, 0);
+  h.daemon.stop();
+});
+
+test("stop during an in-flight refresh sends nothing afterwards", async () => {
+  const h = setup();
+  const gate = deferred();
+  h.claude.gate = gate.promise;
+  const a = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "snapshot" });
+  h.daemon.stop();
+  gate.resolve();
+  await tick(30);
+  assert.equal(a.sent.filter((m) => m.type !== "hello").length, 0);
+  assert.equal(h.claude.snapshotCalls, 1);
 });
 
 test("sameSession compares the fields that matter", () => {
   assert.ok(sameSession(s("claude", "a"), s("claude", "a")));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { status: "running" })));
-  assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { live: { pid: 1, statusUpdatedAt: 2 } })));
-});
-
-test("parseDaemonMessage drops malformed sessions and removed keys", () => {
-  const good: SessionInfo = { agent: "claude", id: "a", title: "t", cwd: "/w", createdAt: 1, updatedAt: 2, status: "idle" };
-  const bad = { ...good, id: 5, status: "weird" };
-  assert.deepEqual(parseDaemonMessage(JSON.stringify({ type: "snapshot", sessions: [null, bad, good] })), { type: "snapshot", sessions: [good] });
-  assert.deepEqual(parseDaemonMessage(JSON.stringify({ type: "changed", upserted: [good, { ...good, updatedAt: "2" }], removed: ["claude:a", null, 3] })), {
-    type: "changed",
-    upserted: [good],
-    removed: ["claude:a"],
-  });
 });

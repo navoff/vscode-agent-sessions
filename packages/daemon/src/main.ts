@@ -37,7 +37,8 @@ export function main(argv: string[]): void {
   };
   // stop() also runs on a protocol mismatch; exit on the next turn so the
   // error reply written just before is flushed.
-  const daemon = new Daemon({ providers, send, version: VERSION, home, log, onStop: () => setImmediate(exit) });
+  const daemon = new Daemon({ providers, version: VERSION, home, log, onStop: () => setImmediate(exit) });
+  const client = daemon.attach(send);
   const rl = createInterface({ input: process.stdin });
   rl.on("line", (line) => {
     if (!line.trim()) return;
@@ -46,7 +47,9 @@ export function main(argv: string[]): void {
       send({ type: "error", message: `bad message: ${line.slice(0, 200)}` });
       return;
     }
-    daemon.handle(msg);
+    client.handle(msg);
+    // A protocol mismatch detaches the only stdio client: flush and exit.
+    if (client.detached && !daemon.clientCount) process.stdout.write("", () => { daemon.stop(); exit(); });
   });
   rl.on("close", () => {
     void Promise.race([daemon.drain(), new Promise<void>((r) => setTimeout(r, EXIT_GRACE_MS).unref())]).then(() => {

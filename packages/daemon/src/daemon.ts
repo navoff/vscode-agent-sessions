@@ -3,7 +3,6 @@ import { PROTOCOL_VERSION, type ClientMessage, type DaemonMessage } from "./prot
 
 export interface DaemonOptions {
   providers: SessionProvider[];
-  send: (msg: DaemonMessage) => void;
   version: string;
   home: string;
   debounceMs?: number;
@@ -11,6 +10,14 @@ export interface DaemonOptions {
   log?: (msg: string) => void;
   /** Called once, at the end of the first stop(). */
   onStop?: () => void;
+  /** Called whenever the last client detaches. */
+  onIdle?: () => void;
+}
+
+export interface DaemonClient {
+  handle(msg: ClientMessage): void;
+  detach(): void;
+  readonly detached: boolean;
 }
 
 export function sameSession(a: SessionInfo, b: SessionInfo): boolean {
@@ -25,13 +32,22 @@ export function sameSession(a: SessionInfo, b: SessionInfo): boolean {
   );
 }
 
+interface ClientState {
+  send: (msg: DaemonMessage) => void;
+  synced: boolean;
+  detached: boolean;
+}
+
 export class Daemon {
   private current = new Map<string, SessionInfo>();
+  private readonly clients = new Set<ClientState>();
   private watchers: Disposable[] = [];
   private debounceTimer: NodeJS.Timeout | undefined;
   private pollTimer: NodeJS.Timeout | undefined;
   private refreshing = false;
-  private pendingFull = false;
+  /** Requesters served by the refresh currently in flight, if any. */
+  private currentRequesters = new Set<ClientState>();
+  private pendingFull = new Set<ClientState>();
   private pendingIncremental = false;
   private started = false;
   private stopped = false;
@@ -46,16 +62,41 @@ export class Daemon {
     this.log = opts.log ?? (() => {});
   }
 
-  handle(msg: ClientMessage): void {
-    if (this.stopped) return;
+  get clientCount(): number {
+    return this.clients.size;
+  }
+
+  attach(send: (msg: DaemonMessage) => void): DaemonClient {
+    const state: ClientState = { send, synced: false, detached: false };
+    this.clients.add(state);
+    const detach = () => this.detachClient(state);
+    return {
+      handle: (msg) => this.handleFrom(state, msg),
+      detach,
+      get detached() {
+        return state.detached;
+      },
+    };
+  }
+
+  private detachClient(state: ClientState): void {
+    if (state.detached) return;
+    state.detached = true;
+    this.clients.delete(state);
+    this.pendingFull.delete(state);
+    if (this.clients.size === 0) this.opts.onIdle?.();
+  }
+
+  private handleFrom(client: ClientState, msg: ClientMessage): void {
+    if (this.stopped || client.detached) return;
     switch (msg.type) {
       case "hello":
         if (msg.protocol !== PROTOCOL_VERSION) {
-          this.opts.send({ type: "error", message: `unsupported protocol ${msg.protocol}, daemon speaks ${PROTOCOL_VERSION}` });
-          this.stop();
+          client.send({ type: "error", message: `unsupported protocol ${msg.protocol}, daemon speaks ${PROTOCOL_VERSION}` });
+          this.detachClient(client);
           return;
         }
-        this.opts.send({
+        client.send({
           type: "hello",
           protocol: PROTOCOL_VERSION,
           daemonVersion: this.opts.version,
@@ -64,10 +105,13 @@ export class Daemon {
         });
         return;
       case "snapshot":
-        void this.refresh(true);
+        void this.refresh(client);
         return;
       case "ping":
-        this.opts.send({ type: "pong" });
+        client.send({ type: "pong" });
+        return;
+      case "shutdown":
+        this.stop();
         return;
     }
   }
@@ -79,6 +123,11 @@ export class Daemon {
     this.watchers = [];
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.pollTimer) clearInterval(this.pollTimer);
+    for (const c of [...this.clients]) {
+      c.detached = true;
+      this.clients.delete(c);
+    }
+    this.pendingFull.clear();
     if (first) this.opts.onStop?.();
   }
 
@@ -92,7 +141,7 @@ export class Daemon {
   private schedule(): void {
     if (this.stopped) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => void this.refresh(false), this.debounceMs);
+    this.debounceTimer = setTimeout(() => void this.refresh(undefined), this.debounceMs);
   }
 
   private async collect(): Promise<Map<string, SessionInfo>> {
@@ -111,14 +160,7 @@ export class Daemon {
     return next;
   }
 
-  private async runRefresh(full: boolean): Promise<void> {
-    const next = await this.collect();
-    if (this.stopped) return;
-    if (full) {
-      this.current = next;
-      this.opts.send({ type: "snapshot", sessions: [...next.values()] });
-      return;
-    }
+  private broadcastDiff(next: Map<string, SessionInfo>, except: Set<ClientState>): void {
     const upserted: SessionInfo[] = [];
     const removed: string[] = [];
     for (const [k, s] of next) {
@@ -126,29 +168,59 @@ export class Daemon {
       if (!prev || !sameSession(prev, s)) upserted.push(s);
     }
     for (const k of this.current.keys()) if (!next.has(k)) removed.push(k);
-    this.current = next;
-    if (upserted.length > 0 || removed.length > 0) this.opts.send({ type: "changed", upserted, removed });
+    if (upserted.length === 0 && removed.length === 0) return;
+    for (const c of this.clients) {
+      if (c.synced && !except.has(c)) c.send({ type: "changed", upserted, removed });
+    }
   }
 
-  private async refresh(full: boolean): Promise<void> {
+  private async runRefresh(requesters: Set<ClientState>): Promise<void> {
+    const next = await this.collect();
+    if (this.stopped) return;
+    const live = new Set([...requesters].filter((c) => !c.detached));
+    this.broadcastDiff(next, live);
+    this.current = next;
+    const sessions = [...next.values()];
+    for (const c of live) {
+      c.send({ type: "snapshot", sessions });
+      c.synced = true;
+    }
+  }
+
+  /** `requester` undefined means an incremental refresh from watch/poll. */
+  private async refresh(requester: ClientState | undefined): Promise<void> {
     if (this.stopped) return;
     this.ensureStarted();
     if (this.refreshing) {
-      if (full) this.pendingFull = true;
-      else this.pendingIncremental = true;
+      // A requester already covered by the run in flight gets its reply from
+      // that run; only a requester not yet covered needs a follow-up refresh.
+      if (requester) {
+        if (!this.currentRequesters.has(requester)) this.pendingFull.add(requester);
+      } else {
+        this.pendingIncremental = true;
+      }
       return;
     }
+    void this.refreshMany(requester ? new Set([requester]) : new Set());
+  }
+
+  private async refreshMany(requesters: Set<ClientState>): Promise<void> {
+    if (this.stopped) return;
     this.refreshing = true;
-    const run = this.runRefresh(full);
+    this.currentRequesters = requesters;
+    const run = this.runRefresh(requesters);
     this.inFlight = run;
     try {
       await run;
     } finally {
       this.refreshing = false;
       this.inFlight = undefined;
-      if (this.pendingFull) {
-        this.pendingFull = this.pendingIncremental = false;
-        void this.refresh(true);
+      this.currentRequesters = new Set();
+      if (this.pendingFull.size > 0) {
+        const more = this.pendingFull;
+        this.pendingFull = new Set();
+        this.pendingIncremental = false;
+        void this.refreshMany(more);
       } else if (this.pendingIncremental) {
         this.pendingIncremental = false;
         this.schedule();
