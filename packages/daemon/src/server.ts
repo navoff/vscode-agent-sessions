@@ -57,10 +57,7 @@ export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketSe
   const armIdle = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      if (daemon.clientCount === 0) {
-        opts.log("no clients, stopping");
-        daemon.stop();
-      }
+      if (daemon.clientCount === 0) daemon.stop("idle timeout");
     }, opts.idleTimeoutMs);
   };
 

@@ -122,13 +122,15 @@ export class Daemon {
         this.safeSend(client, { type: "pong" });
         return;
       case "shutdown":
-        this.stop();
+        this.stop("shutdown requested");
         return;
     }
   }
 
-  stop(): void {
+  /** Stops the daemon; `reason` is logged on the first call. */
+  stop(reason?: string): void {
     const first = !this.stopped;
+    if (first && reason) this.opts.log?.(`stopping: ${reason}`);
     this.stopped = true;
     for (const w of this.watchers) w.dispose();
     this.watchers = [];

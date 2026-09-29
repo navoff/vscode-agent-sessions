@@ -58,12 +58,13 @@ test("ensureSharedDaemon spawns once and retries until the socket appears", asyn
   server?.close();
 });
 
-test("ensureSharedDaemon fails after the timeout and releases the lock", async () => {
+test("ensureSharedDaemon fails after the timeout with the log tail and releases the lock", async () => {
   const dir = await mkdtemp(join(tmpdir(), "as-shared-"));
   const paths = sharedDaemonPaths(dir);
+  await writeFile(paths.log, "old run\nlisten failed: Error: listen EADDRINUSE\n");
   await assert.rejects(
     () => ensureSharedDaemon({ paths, retryMs: 20, connectTimeoutMs: 150, spawnDaemon: () => {}, log: () => {} }),
-    /did not come up/,
+    /did not come up .* within 150 ms: old run \| listen failed: Error: listen EADDRINUSE$/,
   );
   await assert.rejects(stat(paths.lock));
 });

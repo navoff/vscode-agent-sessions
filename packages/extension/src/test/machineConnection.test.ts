@@ -18,7 +18,7 @@ class FakeProc implements DaemonProcess {
   }
   kill() { this.killed = true; }
   onExit(cb: (code: number | null) => void) { this.exitCb = cb; }
-  exit(code: number) { this.exitCb?.(code); }
+  exit(code: number | null) { this.exitCb?.(code); }
 }
 
 function harness(autoReconnect = true) {
@@ -102,6 +102,28 @@ test("exit error includes the last stderr lines of the process", async () => {
   assert.equal(conn.state, "error");
   assert.equal(conn.error, "daemon exited with code 255: Permission denied (publickey)");
   conn.dispose();
+});
+
+test("a null exit code reads as a closed connection", async () => {
+  for (const [closedMessage, expected] of [
+    [undefined, "connection closed: listening on /s | stopping: shutdown requested"],
+    ["connection to the local daemon closed", "connection to the local daemon closed: listening on /s | stopping: shutdown requested"],
+  ] as const) {
+    const procs: FakeProc[] = [];
+    const conn = new MachineConnection("m1", () => {
+      const p = new FakeProc();
+      (p as DaemonProcess).lastStderr = () => "listening on /s | stopping: shutdown requested";
+      if (closedMessage) (p as DaemonProcess).closedMessage = closedMessage;
+      procs.push(p);
+      return p;
+    }, { onStateChange: () => {}, onSessions: () => {} }, { autoReconnect: false, clientOptions: { pingIntervalMs: 1000, pongTimeoutMs: 1000, helloTimeoutMs: 1000 } });
+    conn.connect();
+    await tick(5);
+    procs[0].exit(null);
+    await tick(5);
+    assert.equal(conn.error, expected);
+    conn.dispose();
+  }
 });
 
 test("createStderrTail keeps the last five lines", () => {

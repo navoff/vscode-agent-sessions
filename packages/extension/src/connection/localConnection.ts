@@ -42,5 +42,6 @@ export async function connectLocalDaemon(daemonPath: string, log: (line: string)
       else socket.once("close", fire);
     },
     lastStderr: () => lastLog,
+    closedMessage: "connection to the local daemon closed",
   };
 }

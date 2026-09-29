@@ -11,6 +11,8 @@ export interface DaemonProcess {
   onExit(cb: (code: number | null) => void): void;
   /** The last few stderr lines, joined by " | ", if the process keeps them. */
   lastStderr?(): string;
+  /** Error text when onExit reports `null` (closed or killed); default "connection closed". */
+  closedMessage?: string;
 }
 
 /** Keeps the last `max` non-empty lines written to a stderr stream. */
@@ -118,7 +120,8 @@ export class MachineConnection {
     proc.onExit((code) => {
       if (this.proc !== proc) return;
       const stderr = proc.lastStderr?.();
-      this.onFailure(`daemon exited with code ${code ?? "null"}${stderr ? `: ${stderr}` : ""}`);
+      const what = code === null ? (proc.closedMessage ?? "connection closed") : `daemon exited with code ${code}`;
+      this.onFailure(`${what}${stderr ? `: ${stderr}` : ""}`);
     });
     this.client = new LineClient(
       proc.stdout,

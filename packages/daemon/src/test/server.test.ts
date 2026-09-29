@@ -35,9 +35,10 @@ async function setup(idleTimeoutMs = 60_000, graceMs?: number) {
   const path = join(dir, "d.sock");
   const provider = new FakeProvider();
   let server!: SocketServer;
-  const daemon = new Daemon({ providers: [provider], version: "t", home: "/h", debounceMs: 10, onStop: () => server.finish() });
+  const logs: string[] = [];
+  const daemon = new Daemon({ providers: [provider], version: "t", home: "/h", debounceMs: 10, log: (m) => logs.push(m), onStop: () => server.finish() });
   server = await serveOnSocket(daemon, path, { idleTimeoutMs, graceMs, log: () => {} });
-  return { dir, path, daemon, server, provider };
+  return { dir, path, daemon, server, provider, logs };
 }
 
 test("two clients talk independently over the socket", async () => {
@@ -95,6 +96,7 @@ test("daemon stops after the idle timeout without clients", async () => {
   await h.server.close();
   assert.ok(Date.now() - t0 < 2000);
   await assert.rejects(stat(h.path));
+  assert.ok(h.logs.includes("stopping: idle timeout"), h.logs.join("\n"));
 });
 
 test("a new client cancels the idle timer", async () => {

@@ -42,7 +42,8 @@ export function main(argv: string[]): void {
   }
   const version = `${VERSION}+${buildId()}`;
   const home = homedir();
-  const log = (msg: string) => process.stderr.write(`[daemon] ${msg}\n`);
+  // Every run appends to the same daemon.log, so each line names its time and pid.
+  const log = (msg: string) => process.stderr.write(`${new Date().toISOString()} [daemon ${process.pid}] ${msg}\n`);
   const providers = [
     new ClaudeProvider({ claudeDir: process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"), log }),
     new CodexProvider({ codexDir: process.env.CODEX_HOME ?? join(home, ".codex"), log }),
@@ -85,9 +86,8 @@ export function main(argv: string[]): void {
       // Read by the extension before an automatic restart, see daemonFreshForMs.
       await writeFile(join(dirname(socketPath), "daemon.version"), version);
       log(`listening on ${socketPath} (version ${version}, pid ${process.pid})`);
-      const stop = () => daemon.stop();
-      process.on("SIGTERM", stop);
-      process.on("SIGINT", stop);
+      process.on("SIGTERM", () => daemon.stop("SIGTERM"));
+      process.on("SIGINT", () => daemon.stop("SIGINT"));
       await server.close();
       process.exit(0);
     })().catch((err) => {
@@ -121,11 +121,11 @@ export function main(argv: string[]): void {
     }
     client.handle(msg);
     // A protocol mismatch detaches the only stdio client: flush and exit.
-    if (client.detached && !daemon.clientCount) process.stdout.write("", () => { daemon.stop(); exit(); });
+    if (client.detached && !daemon.clientCount) process.stdout.write("", () => { daemon.stop("protocol mismatch"); exit(); });
   });
   rl.on("close", () => {
     void Promise.race([daemon.drain(), new Promise<void>((r) => setTimeout(r, EXIT_GRACE_MS).unref())]).then(() => {
-      daemon.stop();
+      daemon.stop("stdin closed");
       exit();
     });
   });

@@ -71,6 +71,8 @@ test("--listen serves a socket and exits on shutdown", async () => {
   const sock = join(home, "d.sock");
   const child = spawn(process.execPath, [bundle, "--listen", sock], { env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") }, stdio: ["ignore", "pipe", "pipe"] });
   const exited = new Promise<number | null>((r) => child.on("close", r));
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
   const { connect } = await import("node:net");
   let socket: import("node:net").Socket | undefined;
   for (let i = 0; i < 50 && !socket; i++) {
@@ -88,6 +90,8 @@ test("--listen serves a socket and exits on shutdown", async () => {
   socket.write('{"type":"shutdown"}\n');
   assert.equal(await exited, 0);
   await assert.rejects(stat(join(home, "daemon.pid")), "pid file removed");
+  assert.match(stderr, new RegExp(`^\\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z \\[daemon ${child.pid}\\] listening on `, "m"));
+  assert.match(stderr, /\] stopping: shutdown requested$/m);
   await assert.rejects(stat(sock), "socket removed");
 });
 
@@ -99,8 +103,11 @@ test("--listen exits on SIGTERM and removes its socket and pid file", async () =
   const pidFile = join(home, "daemon.pid");
   for (let i = 0; i < 50 && !(await stat(pidFile).then(() => true, () => false)); i++) await new Promise((r) => setTimeout(r, 100));
   assert.equal(await readFile(pidFile, "utf8"), String(child.pid));
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
   child.kill("SIGTERM");
   assert.equal(await exited, 0);
+  assert.match(stderr, /\] stopping: SIGTERM$/m);
   await assert.rejects(stat(pidFile));
   await assert.rejects(stat(sock));
 });

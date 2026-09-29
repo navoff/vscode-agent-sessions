@@ -185,7 +185,8 @@ export async function ensureSharedDaemon(opts: EnsureOptions): Promise<Socket> {
   } finally {
     if (held) await releaseLock(lock);
   }
-  throw new Error(`shared daemon did not come up at ${socket} within ${timeoutMs} ms`);
+  const tail = await tailOfLog(opts.paths.log);
+  throw new Error(`shared daemon did not come up at ${socket} within ${timeoutMs} ms${tail ? `: ${tail}` : ""}`);
 }
 
 /** Starts the daemon detached from this process, appending its output to `logPath`. */
