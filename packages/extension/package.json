@@ -39,6 +39,7 @@
       { "command": "agentSessions.deleteSession", "title": "Delete Session…", "category": "Agent Sessions", "enablement": "viewItem =~ /^session:.*:idle$/" },
       { "command": "agentSessions.toggleRemote", "title": "Show/Hide Remote Sessions", "category": "Agent Sessions", "icon": "$(remote)" },
       { "command": "agentSessions.toggleHidden", "title": "Show/Hide Hidden Sessions", "category": "Agent Sessions", "icon": "$(eye)" },
+      { "command": "agentSessions.toggleHiddenActive", "title": "Show/Hide Hidden Sessions", "category": "Agent Sessions", "icon": "$(eye-closed)" },
       { "command": "agentSessions.filterAgents", "title": "Filter Sessions", "category": "Agent Sessions", "icon": "$(filter)" },
       { "command": "agentSessions.filterSessionsActive", "title": "Filter Sessions", "category": "Agent Sessions", "icon": "$(filter-filled)" },
       { "command": "agentSessions.addMachine", "title": "Add Machine", "category": "Agent Sessions", "icon": "$(add)" },
@@ -58,7 +59,8 @@
         { "command": "agentSessions.filterAgents", "when": "view == agentSessions.view && !agentSessions.filterActive", "group": "navigation@2" },
         { "command": "agentSessions.filterSessionsActive", "when": "view == agentSessions.view && agentSessions.filterActive", "group": "navigation@2" },
         { "command": "agentSessions.toggleRemote", "when": "view == agentSessions.view", "group": "navigation@3" },
-        { "command": "agentSessions.toggleHidden", "when": "view == agentSessions.view", "group": "navigation@4" },
+        { "command": "agentSessions.toggleHidden", "when": "view == agentSessions.view && !agentSessions.showHidden", "group": "navigation@4" },
+        { "command": "agentSessions.toggleHiddenActive", "when": "view == agentSessions.view && agentSessions.showHidden", "group": "navigation@4" },
         { "command": "agentSessions.refresh", "when": "view == agentSessions.view", "group": "navigation@5" },
         { "command": "agentSessions.showLog", "when": "view == agentSessions.view", "group": "z_misc" }
       ],
@@ -89,6 +91,7 @@
         { "command": "agentSessions.resumeInTerminal", "when": "false" },
         { "command": "agentSessions.deleteSession", "when": "false" },
         { "command": "agentSessions.filterSessionsActive", "when": "false" },
+        { "command": "agentSessions.toggleHiddenActive", "when": "false" },
         { "command": "agentSessions.connectMachine", "when": "false" },
         { "command": "agentSessions.disconnectMachine", "when": "false" }
       ]

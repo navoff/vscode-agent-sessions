@@ -101,8 +101,22 @@ test("sessionContextValue names place, agent, marks and status", () => {
 interface MenuItem { command: string; when?: string }
 // package.json sits next to out/, two levels above this compiled test.
 const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
-  contributes: { commands: Array<{ command: string; enablement?: string }>; menus: { "view/item/context": MenuItem[] } };
+  contributes: { commands: Array<{ command: string; enablement?: string }>; menus: { "view/item/context": MenuItem[]; "view/title": MenuItem[]; commandPalette: MenuItem[] } };
 };
+
+test("header toggles with two icons use complementary when clauses", () => {
+  const pairs: Array<[string, string, string]> = [
+    ["agentSessions.filterAgents", "agentSessions.filterSessionsActive", "agentSessions.filterActive"],
+    ["agentSessions.toggleHidden", "agentSessions.toggleHiddenActive", "agentSessions.showHidden"],
+  ];
+  const title = new Map(manifest.contributes.menus["view/title"].map((i) => [i.command, i.when ?? ""]));
+  const palette = new Map(manifest.contributes.menus.commandPalette.map((i) => [i.command, i.when ?? ""]));
+  for (const [off, on, key] of pairs) {
+    assert.equal(title.get(off), `view == agentSessions.view && !${key}`);
+    assert.equal(title.get(on), `view == agentSessions.view && ${key}`);
+    assert.equal(palette.get(on), "false");
+  }
+});
 /** Evaluates the `viewItem =~ /re/` part of a when clause; other terms are taken as true. */
 function matchesViewItem(clause: string | undefined, contextValue: string): boolean {
   const m = clause?.match(/viewItem =~ \/(.+?)\/(?:\s|$)/);

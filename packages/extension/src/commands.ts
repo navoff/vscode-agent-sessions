@@ -155,11 +155,13 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     deps.setFilter({ ...f, showRemote: !f.showRemote });
     deps.refresh();
   });
-  reg("agentSessions.toggleHidden", async () => {
+  const toggleHidden = async () => {
     const cfg = vscode.workspace.getConfiguration("agentSessions");
     await cfg.update("showHidden", !cfg.get<boolean>("showHidden", false), vscode.ConfigurationTarget.Global);
     deps.refresh();
-  });
+  };
+  reg("agentSessions.toggleHidden", toggleHidden);
+  reg("agentSessions.toggleHiddenActive", toggleHidden);
   const filterSessions = async () => {
     const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
     const items = buildFilterItems(deps.getFilter(), hasWorkspace).map((i): vscode.QuickPickItem & { id?: FilterPickId } =>

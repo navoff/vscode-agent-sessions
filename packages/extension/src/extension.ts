@@ -78,6 +78,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.commands.executeCommand("setContext", "agentSessions.filterActive", active);
   };
   updateFilterContext();
+  // Drives the eye / eye-closed icon of the hidden-sessions toggle.
+  const updateShowHiddenContext = () => {
+    void vscode.commands.executeCommand("setContext", "agentSessions.showHidden", cfg().get<boolean>("showHidden", false));
+  };
+  updateShowHiddenContext();
 
   const tree = new SessionsTreeProvider(
     {
@@ -405,7 +410,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("agentSessions.restartLocalDaemon", () => restartLocalDaemon(false)),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("agentSessions")) refresh();
+      if (e.affectsConfiguration("agentSessions")) {
+        updateShowHiddenContext();
+        refresh();
+      }
     }),
     { dispose: () => { disposed = true; if (reloadTimer) clearTimeout(reloadTimer); if (versionCheckTimer) clearTimeout(versionCheckTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
     log,
