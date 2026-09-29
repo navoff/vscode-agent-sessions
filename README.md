@@ -60,6 +60,7 @@ agents' own session stores instead and stays out of their way.
 | Action | How |
 | --- | --- |
 | Open a session | Double-click it (or single-click with `agentSessions.openOn` set to `singleClick`). "Open Session" in the context menu always opens immediately. |
+| Open a Claude session of another folder | Claude Code finds only sessions of the folder open in its window and its git worktrees, so such a session offers "Open Folder in New Window", which then opens the session there, or "Resume in Terminal". |
 | Resume in a terminal | "Resume in Terminal" opens a terminal in the session folder with `claude --resume <id>` or `codex resume <id>` typed in, not run. |
 | Mark read / unread | Context menu. Opening a session marks it read. |
 | Hide / unhide | "Hide Session" removes a session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. |

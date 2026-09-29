@@ -5,6 +5,7 @@ import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState
 import type { SessionNode, TreeNode } from "./tree/treeModel.js";
 import { selectionTargets } from "./tree/selection.js";
 import { DoubleClickDetector } from "./tree/clickDetector.js";
+import { claudeFindsSession, isDirectory, PENDING_OPEN_KEY, type PendingOpen } from "./claudeFolder.js";
 
 export type { FilterState };
 
@@ -17,6 +18,8 @@ export interface CommandDeps {
   deleteSession(machineId: string, agent: AgentKind, id: string): Promise<void>;
   /** Current tree selection, for commands run from a keybinding. */
   selection(): readonly TreeNode[];
+  /** Shared by all windows; hands a session over to a window opened on its folder. */
+  globalState: vscode.Memento;
   log: vscode.OutputChannel;
 }
 
@@ -58,6 +61,35 @@ async function offerInstall(extensionId: string, name: string): Promise<void> {
   if (pick === "Install") await vscode.commands.executeCommand("workbench.extensions.installExtension", extensionId);
 }
 
+function resumeInTerminal(session: SessionInfo): void {
+  const cmd = session.agent === "claude" ? `claude --resume ${session.id}` : `codex resume ${session.id}`;
+  const term = vscode.window.createTerminal({ name: `${session.agent}: ${session.title}`, cwd: session.cwd || undefined });
+  term.show();
+  term.sendText(cmd, false);
+}
+
+/**
+ * Claude Code opens a session of another folder as an empty conversation, so
+ * offer to open that folder in a new window, which then opens the session.
+ */
+async function offerClaudeFolder(deps: CommandDeps, session: SessionInfo): Promise<void> {
+  const why = "Claude Code opens only sessions of the folder open in its window.";
+  if (!(await isDirectory(session.cwd))) {
+    void vscode.window.showWarningMessage(`"${session.title}" was started in ${session.cwd}, which no longer exists. ${why}`);
+    return;
+  }
+  const newWindow = "Open Folder in New Window";
+  const terminal = "Resume in Terminal";
+  const pick = await vscode.window.showInformationMessage(`"${session.title}" belongs to ${session.cwd}. ${why}`, newWindow, terminal);
+  if (pick === newWindow) {
+    const pending: PendingOpen = { session, at: Date.now() };
+    await deps.globalState.update(PENDING_OPEN_KEY, pending);
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(session.cwd), { forceNewWindow: true });
+  } else if (pick === terminal) {
+    resumeInTerminal(session);
+  }
+}
+
 export async function openSession(deps: CommandDeps, machineId: string, session: SessionInfo): Promise<void> {
   if (machineId !== "local") {
     void vscode.window.showInformationMessage("Opening remote sessions will come in a later version.");
@@ -66,6 +98,8 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
   if (!checkSessionId(session.id)) return;
   if (session.agent === "claude") {
     if (!vscode.extensions.getExtension(CLAUDE_EXTENSION)) return offerInstall(CLAUDE_EXTENSION, "Claude Code");
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    if (!(await claudeFindsSession(session.cwd, folders))) return offerClaudeFolder(deps, session);
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
     if (!vscode.extensions.getExtension(CODEX_EXTENSION)) return offerInstall(CODEX_EXTENSION, "Codex");
@@ -132,10 +166,7 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
   reg("agentSessions.resumeInTerminal", (node) => {
     const s = sessionOf(node);
     if (!s || s.machineId !== "local" || !checkSessionId(s.session.id)) return;
-    const cmd = s.session.agent === "claude" ? `claude --resume ${s.session.id}` : `codex resume ${s.session.id}`;
-    const term = vscode.window.createTerminal({ name: `${s.session.agent}: ${s.session.title}`, cwd: s.session.cwd || undefined });
-    term.show();
-    term.sendText(cmd, false);
+    resumeInTerminal(s.session);
   });
   regMulti("agentSessions.deleteSession", async (targets) => {
     const skipped: string[] = [];

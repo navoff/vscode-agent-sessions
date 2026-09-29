@@ -11,7 +11,8 @@ import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnecti
 import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
-import { registerSessionCommands, type FilterState } from "./commands.js";
+import { openSession, registerSessionCommands, type CommandDeps, type FilterState } from "./commands.js";
+import { PENDING_OPEN_KEY, pendingSessionFor, type PendingOpen } from "./claudeFolder.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
@@ -372,7 +373,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   };
 
-  registerSessionCommands(context, {
+  const sessionDeps: CommandDeps = {
     store,
     refresh,
     log,
@@ -387,7 +388,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       updateFilterContext();
       void context.workspaceState.update(FILTER_KEY, f);
     },
-  });
+    globalState: context.globalState,
+  };
+  registerSessionCommands(context, sessionDeps);
+
+  // A session that another window could not open in Claude Code and handed
+  // over to a window on its folder: this one, when it has just been opened
+  // or, if it already existed, focused.
+  const openPendingSession = async () => {
+    const pending = context.globalState.get<PendingOpen>(PENDING_OPEN_KEY);
+    if (!pending) return;
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    const session = await pendingSessionFor(pending, folders, Date.now());
+    if (!session) return;
+    await context.globalState.update(PENDING_OPEN_KEY, undefined);
+    await openSession(sessionDeps, LOCAL_ID, session);
+  };
+  context.subscriptions.push(vscode.window.onDidChangeWindowState((s) => { if (s.focused) void openPendingSession(); }));
+  void openPendingSession();
 
   registerMachineCommands(context, {
     current: () => machines,
