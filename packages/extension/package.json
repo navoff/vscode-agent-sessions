@@ -28,7 +28,7 @@
   "scripts": {
     "build": "tsc -p . && node scripts/gen-icons.mjs && node esbuild.mjs",
     "test": "tsc -p . && node --test \"out/test/**/*.test.js\"",
-    "package": "npm run build && vsce package --no-dependencies"
+    "package": "npm run build --prefix ../.. && vsce package --no-dependencies"
   },
   "contributes": {
     "viewsContainers": {
