@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -58,9 +58,30 @@ export function main(argv: string[]): void {
     void (async () => {
       await mkdir(dirname(socketPath), { recursive: true });
       await removeStaleSocket(socketPath);
+      const pidFile = join(dirname(socketPath), "daemon.pid");
+      // Removes the pid file unless a successor has already replaced it.
+      const removePidFile = () => {
+        try {
+          if (readFileSync(pidFile, "utf8").trim() === String(process.pid)) unlinkSync(pidFile);
+        } catch {
+          // already gone
+        }
+      };
       let server!: SocketServer;
-      const daemon = new Daemon({ providers, version, home, log, onStop: () => server.finish() });
+      const daemon = new Daemon({
+        providers,
+        version,
+        home,
+        log,
+        onStop: () => {
+          removePidFile();
+          server.finish();
+        },
+      });
       server = await serveOnSocket(daemon, socketPath, { idleTimeoutMs: IDLE_TIMEOUT_MS, log });
+      // The extension's restart command kills this pid when the daemon does
+      // not exit on "shutdown" (a hung event loop).
+      await writeFile(pidFile, String(process.pid));
       // Read by the extension before an automatic restart, see daemonFreshForMs.
       await writeFile(join(dirname(socketPath), "daemon.version"), version);
       log(`listening on ${socketPath} (version ${version}, pid ${process.pid})`);

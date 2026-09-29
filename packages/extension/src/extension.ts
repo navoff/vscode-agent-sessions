@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { AgentKind } from "@agent-sessions/core";
 import { MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
 import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnection.js";
-import { daemonBuildId, daemonFreshForMs } from "./connection/sharedDaemon.js";
+import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { registerSessionCommands, type FilterState } from "./commands.js";
@@ -163,29 +163,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       appendLog(`[${LOCAL_ID}] local daemon ${running} differs from bundled ${bundledDaemonVersion}, restarting`);
-      restartLocalDaemon(true);
+      void restartLocalDaemon(true);
     });
   };
 
-  // Asks the shared daemon to stop and reconnects, which starts a fresh one.
-  // Automatic restarts (version mismatch) are limited to one per minute so
-  // two windows with different bundled versions cannot restart it in a loop.
+  // Asks the shared daemon to stop, kills it when it does not exit (a hung
+  // daemon never answers "shutdown"), and reconnects, which starts a fresh
+  // one. Automatic restarts (version mismatch) are limited to one per minute
+  // per window.
   let lastAutoRestart = 0;
-  let restartTimer: ReturnType<typeof setTimeout> | undefined;
-  const restartLocalDaemon = (auto: boolean) => {
+  let restarting = false;
+  let disposed = false;
+  const restartLocalDaemon = async (auto: boolean): Promise<void> => {
+    if (restarting) return;
     if (auto && Date.now() - lastAutoRestart < AUTO_RESTART_INTERVAL_MS) {
       appendLog(`[${LOCAL_ID}] auto restart suppressed`);
       return;
     }
     if (auto) lastAutoRestart = Date.now();
-    appendLog(`[${LOCAL_ID}] restarting local daemon`);
-    connections.get(LOCAL_ID)?.requestShutdown();
-    if (restartTimer) clearTimeout(restartTimer);
-    restartTimer = setTimeout(() => {
-      restartTimer = undefined;
+    restarting = true;
+    try {
+      appendLog(`[${LOCAL_ID}] restarting local daemon`);
+      const paths = localDaemonPaths();
+      // Read before the shutdown: afterwards the file may already name a
+      // successor started by another window.
+      const pid = await readDaemonPid(paths.pid);
+      const c = connections.get(LOCAL_ID);
+      c?.requestShutdown();
+      for (let i = 0; i < 20 && c && connections.get(LOCAL_ID) === c && c.state === "connected"; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const result = await stopDaemonProcess(paths, {
+        pid,
+        waitMs: 2000,
+        kill: (p, signal) => process.kill(p, signal),
+        isAlive: daemonProcessAlive,
+      });
+      if (result === "killed") appendLog(`[${LOCAL_ID}] local daemon ${pid} did not exit on SIGTERM, killed it`);
+      if (disposed) return;
       dropConnection(LOCAL_ID);
       connect(LOCAL_ID);
-    }, 500);
+    } catch (err) {
+      appendLog(`[${LOCAL_ID}] restart failed: ${String(err)}`);
+    } finally {
+      restarting = false;
+    }
   };
 
   const reloadMachinesOnce = async () => {
@@ -290,7 +312,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("agentSessions")) refresh();
     }),
-    { dispose: () => { if (reloadTimer) clearTimeout(reloadTimer); if (restartTimer) clearTimeout(restartTimer); if (versionCheckTimer) clearTimeout(versionCheckTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
+    { dispose: () => { disposed = true; if (reloadTimer) clearTimeout(reloadTimer); if (versionCheckTimer) clearTimeout(versionCheckTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
     log,
   );
 

@@ -5,13 +5,13 @@ import { chmod, mkdtemp, readFile, writeFile, utimes, stat } from "node:fs/promi
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, ensureSharedDaemon, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
+import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, daemonProcessAlive, ensureSharedDaemon, readDaemonPid, stopDaemonProcess, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
 
 test("socketDir prefers XDG_RUNTIME_DIR and falls back to home", () => {
   assert.equal(socketDir({ XDG_RUNTIME_DIR: "/run/user/1" }, "/home/u"), "/run/user/1/agent-sessions");
   assert.equal(socketDir({}, "/Users/u"), "/Users/u/.local/share/agent-sessions");
   const p = sharedDaemonPaths("/x");
-  assert.deepEqual(p, { socket: "/x/daemon.sock", lock: "/x/daemon.lock", log: "/x/daemon.log", version: "/x/daemon.version" });
+  assert.deepEqual(p, { socket: "/x/daemon.sock", lock: "/x/daemon.lock", log: "/x/daemon.log", version: "/x/daemon.version", pid: "/x/daemon.pid" });
 });
 
 test("acquireLock is exclusive and ignores stale locks", async () => {
@@ -169,4 +169,78 @@ test("daemonFreshForMs protects a daemon whose version file is young and matches
   assert.equal(await daemonFreshForMs(file, "0.1.0+aaa", mtime + 10_000), 50_000);
   assert.equal(await daemonFreshForMs(file, "0.1.0+bbb", mtime + 10_000), 0, "another daemon's file");
   assert.equal(await daemonFreshForMs(file, "0.1.0+aaa", mtime + 61_000), 0, "old file");
+});
+
+async function daemonFiles(pid: string) {
+  const dir = await mkdtemp(join(tmpdir(), "as-stop-"));
+  const paths = sharedDaemonPaths(dir);
+  await writeFile(paths.socket, "");
+  if (pid) await writeFile(paths.pid, pid);
+  const exists = async (f: string) => stat(f).then(() => true, () => false);
+  return { paths, exists };
+}
+
+/** A fake process table: `pid` stays alive until it receives one of `diesOn`. */
+function fakeProcess(pid: number, diesOn: NodeJS.Signals[]) {
+  let alive = true;
+  const signals: NodeJS.Signals[] = [];
+  return {
+    signals,
+    kill: (p: number, s: NodeJS.Signals) => {
+      assert.equal(p, pid);
+      signals.push(s);
+      if (diesOn.includes(s)) alive = false;
+    },
+    isAlive: (p: number) => p === pid && alive,
+  };
+}
+
+test("stopDaemonProcess does nothing without a pid file", async () => {
+  const { paths, exists } = await daemonFiles("");
+  const proc = fakeProcess(4242, ["SIGTERM"]);
+  assert.equal(await stopDaemonProcess(paths, { waitMs: 100, pollMs: 10, ...proc }), "none");
+  assert.deepEqual(proc.signals, []);
+  assert.equal(await exists(paths.socket), true, "a socket without our pid file may belong to a successor");
+});
+
+test("stopDaemonProcess terminates a daemon that exits on SIGTERM and removes its files", async () => {
+  const { paths, exists } = await daemonFiles("4242\n");
+  assert.equal(await readDaemonPid(paths.pid), 4242);
+  const proc = fakeProcess(4242, ["SIGTERM"]);
+  assert.equal(await stopDaemonProcess(paths, { waitMs: 100, pollMs: 10, ...proc }), "exited");
+  assert.deepEqual(proc.signals, ["SIGTERM"]);
+  assert.equal(await exists(paths.socket), false);
+  assert.equal(await exists(paths.pid), false);
+});
+
+test("stopDaemonProcess kills a daemon that ignores SIGTERM", async () => {
+  const { paths, exists } = await daemonFiles("4242");
+  const proc = fakeProcess(4242, ["SIGKILL"]);
+  const start = Date.now();
+  assert.equal(await stopDaemonProcess(paths, { waitMs: 100, pollMs: 10, ...proc }), "killed");
+  assert.ok(Date.now() - start >= 90, "waits before SIGKILL");
+  assert.deepEqual(proc.signals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(await exists(paths.socket), false);
+  assert.equal(await exists(paths.pid), false);
+});
+
+test("stopDaemonProcess cleans up after a dead daemon and spares a successor's files", async () => {
+  const dead = await daemonFiles("4242");
+  const none = fakeProcess(1, []);
+  assert.equal(await stopDaemonProcess(dead.paths, { waitMs: 100, pollMs: 10, ...none }), "none");
+  assert.deepEqual(none.signals, []);
+  assert.equal(await dead.exists(dead.paths.socket), false, "stale socket removed");
+
+  // The pid read before the shutdown is gone; the file now names a successor.
+  const next = await daemonFiles("5555");
+  const proc = fakeProcess(4242, ["SIGTERM"]);
+  assert.equal(await stopDaemonProcess(next.paths, { pid: 4242, waitMs: 100, pollMs: 10, ...proc }), "exited");
+  assert.equal(await next.exists(next.paths.socket), true);
+  assert.equal(await readDaemonPid(next.paths.pid), 5555);
+});
+
+test("daemonProcessAlive rejects dead pids and processes that are not the daemon", () => {
+  assert.equal(daemonProcessAlive(2 ** 22 + 1), false);
+  // This test runner is alive but is not "daemon.mjs --listen".
+  assert.equal(daemonProcessAlive(process.pid), process.platform !== "linux");
 });

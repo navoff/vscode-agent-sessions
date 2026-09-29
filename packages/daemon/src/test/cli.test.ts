@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +84,23 @@ test("--listen serves a socket and exits on shutdown", async () => {
   assert.equal(hello.type, "hello");
   assert.match(hello.daemonVersion, /^\d+\.\d+\.\d+\+[0-9a-f]{12}$/);
   assert.equal(await readFile(join(home, "daemon.version"), "utf8"), hello.daemonVersion);
+  assert.equal(await readFile(join(home, "daemon.pid"), "utf8"), String(child.pid));
   socket.write('{"type":"shutdown"}\n');
   assert.equal(await exited, 0);
+  await assert.rejects(stat(join(home, "daemon.pid")), "pid file removed");
+  await assert.rejects(stat(sock), "socket removed");
+});
+
+test("--listen exits on SIGTERM and removes its socket and pid file", async () => {
+  const home = await mkdtemp(join(tmpdir(), "home-"));
+  const sock = join(home, "d.sock");
+  const child = spawn(process.execPath, [bundle, "--listen", sock], { env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") }, stdio: ["ignore", "pipe", "pipe"] });
+  const exited = new Promise<number | null>((r) => child.on("close", r));
+  const pidFile = join(home, "daemon.pid");
+  for (let i = 0; i < 50 && !(await stat(pidFile).then(() => true, () => false)); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await readFile(pidFile, "utf8"), String(child.pid));
+  child.kill("SIGTERM");
+  assert.equal(await exited, 0);
+  await assert.rejects(stat(pidFile));
+  await assert.rejects(stat(sock));
 });

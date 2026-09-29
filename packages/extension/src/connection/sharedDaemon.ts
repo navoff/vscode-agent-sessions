@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { openSync, closeSync } from "node:fs";
+import { openSync, closeSync, readFileSync } from "node:fs";
 import { mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { dirname, join } from "node:path";
@@ -11,6 +11,8 @@ export interface SharedDaemonPaths {
   log: string;
   /** Written by the daemon at startup: its reported version. */
   version: string;
+  /** Written by the daemon at startup and removed when it stops: its pid. */
+  pid: string;
 }
 
 export function socketDir(env: NodeJS.ProcessEnv, home: string): string {
@@ -19,7 +21,7 @@ export function socketDir(env: NodeJS.ProcessEnv, home: string): string {
 }
 
 export function sharedDaemonPaths(dir: string): SharedDaemonPaths {
-  return { socket: join(dir, "daemon.sock"), lock: join(dir, "daemon.lock"), log: join(dir, "daemon.log"), version: join(dir, "daemon.version") };
+  return { socket: join(dir, "daemon.sock"), lock: join(dir, "daemon.lock"), log: join(dir, "daemon.log"), version: join(dir, "daemon.version"), pid: join(dir, "daemon.pid") };
 }
 
 /**
@@ -206,6 +208,94 @@ export async function spawnDetachedDaemon(
   } finally {
     closeSync(fd);
   }
+}
+
+/** The pid in the daemon's pid file, if there is a valid one. */
+export async function readDaemonPid(pidFile: string): Promise<number | undefined> {
+  try {
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether `pid` is a running shared daemon. On Linux its command line must
+ * name `--listen`, so a stale pid file whose pid was reused by another
+ * process is ignored; elsewhere only the existence of the process is checked.
+ */
+export function daemonProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EPERM") return false;
+  }
+  if (process.platform !== "linux") return true;
+  try {
+    const args = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+    return args.includes("--listen") && args.some((a) => a.endsWith("daemon.mjs"));
+  } catch {
+    return false;
+  }
+}
+
+export interface StopDaemonOptions {
+  /** How long to wait after SIGTERM, and again after SIGKILL. */
+  waitMs: number;
+  kill: (pid: number, signal: NodeJS.Signals) => void;
+  isAlive: (pid: number) => boolean;
+  /** The daemon's pid, read before asking it to shut down; read from the pid file when absent. */
+  pid?: number;
+  pollMs?: number;
+}
+
+/**
+ * Makes sure the daemon process is gone: SIGTERM, then SIGKILL after
+ * `waitMs`. A daemon that did not stop cleanly leaves its socket and pid file
+ * behind; both are removed while the pid file still names the stopped pid,
+ * never after a successor has written its own. Returns "none" when there was
+ * no live daemon process.
+ */
+export async function stopDaemonProcess(paths: Pick<SharedDaemonPaths, "socket" | "pid">, opts: StopDaemonOptions): Promise<"none" | "exited" | "killed"> {
+  const pid = opts.pid ?? (await readDaemonPid(paths.pid));
+  if (pid === undefined) return "none";
+  const pollMs = opts.pollMs ?? 100;
+  const waitForExit = async () => {
+    for (let waited = 0; waited < opts.waitMs; waited += pollMs) {
+      if (!opts.isAlive(pid)) return true;
+      await sleep(pollMs);
+    }
+    return !opts.isAlive(pid);
+  };
+  const signal = (s: NodeJS.Signals) => {
+    try {
+      opts.kill(pid, s);
+    } catch {
+      // exited meanwhile
+    }
+  };
+  let result: "none" | "exited" | "killed" = "none";
+  if (opts.isAlive(pid)) {
+    signal("SIGTERM");
+    if (await waitForExit()) {
+      result = "exited";
+    } else {
+      signal("SIGKILL");
+      await waitForExit();
+      result = "killed";
+    }
+  }
+  if ((await readDaemonPid(paths.pid)) === pid) {
+    for (const f of [paths.socket, paths.pid]) {
+      try {
+        await unlink(f);
+      } catch {
+        // already gone
+      }
+    }
+  }
+  return result;
 }
 
 const TAIL_BYTES = 64 * 1024;
