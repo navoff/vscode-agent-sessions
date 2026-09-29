@@ -1,5 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readPendingOpen } from "../pendingOpen.js";
 import type { SessionInfo, SessionProvider } from "@agent-sessions/core";
 import { Daemon, sameSession } from "../daemon.js";
 import { parseClientMessage, parseDaemonMessage, PROTOCOL_VERSION, type DaemonMessage } from "../protocol.js";
@@ -41,13 +45,13 @@ function deferred() {
   return { promise, resolve };
 }
 
-function setup(opts: { debounceMs?: number; pollMs?: number } = {}) {
+function setup(opts: { debounceMs?: number; pollMs?: number; home?: string } = {}) {
   const claude = new FakeProvider("claude");
   const codex = new FakeProvider("codex");
   const idle: number[] = [];
   let stopped = 0;
   const daemon = new Daemon({
-    providers: [claude, codex], version: "t", home: "/h",
+    providers: [claude, codex], version: "t", home: opts.home ?? "/h",
     debounceMs: opts.debounceMs ?? 10, pollMs: opts.pollMs ?? 60_000,
     onIdle: () => idle.push(Date.now()), onStop: () => { stopped++; },
   });
@@ -84,6 +88,32 @@ test("parse pendingOpen and pendingOpenResult messages", () => {
   assert.deepEqual(parseDaemonMessage('{"type":"pendingOpenResult","requestId":"9","ok":true}'), { type: "pendingOpenResult", requestId: "9", ok: true });
   assert.deepEqual(parseDaemonMessage('{"type":"pendingOpenResult","requestId":"9","ok":false,"error":"no"}'), { type: "pendingOpenResult", requestId: "9", ok: false, error: "no" });
   assert.equal(parseDaemonMessage('{"type":"pendingOpenResult","ok":true}'), undefined);
+});
+
+test("pendingOpen writes the file under home and answers the requester", async () => {
+  const home = await mkdtemp(join(tmpdir(), "as-daemon-home-"));
+  const h = setup({ home });
+  const a = h.attach();
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  const session = s("claude", "a", { cwd: home });
+  a.client.handle({ type: "pendingOpen", requestId: "1", session });
+  await tick(20);
+  assert.deepEqual(a.sent.at(-1), { type: "pendingOpenResult", requestId: "1", ok: true });
+  assert.deepEqual((await readPendingOpen(home))?.session, session);
+  h.daemon.stop();
+});
+
+test("pendingOpen reports a missing folder and needs the handshake", async () => {
+  const home = await mkdtemp(join(tmpdir(), "as-daemon-home-"));
+  const h = setup({ home });
+  const a = h.attach();
+  a.client.handle({ type: "pendingOpen", requestId: "1", session: s("claude", "a", { cwd: home }) });
+  assert.deepEqual(a.sent.at(-1), { type: "pendingOpenResult", requestId: "1", ok: false, error: "handshake required" });
+  a.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  a.client.handle({ type: "pendingOpen", requestId: "2", session: s("claude", "a", { cwd: join(home, "gone") }) });
+  await tick(20);
+  assert.deepEqual(a.sent.at(-1), { type: "pendingOpenResult", requestId: "2", ok: false, error: `${join(home, "gone")} does not exist` });
+  h.daemon.stop();
 });
 
 test("parseClientMessage reads hello with protocol and rejects non-JSON", () => {

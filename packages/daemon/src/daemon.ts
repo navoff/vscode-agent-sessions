@@ -1,5 +1,6 @@
 import { sessionKey, type Disposable, type SessionInfo, type SessionProvider } from "@agent-sessions/core";
 import { PROTOCOL_VERSION, type ClientMessage, type DaemonMessage } from "./protocol.js";
+import { writePendingOpen } from "./pendingOpen.js";
 
 export interface DaemonOptions {
   providers: SessionProvider[];
@@ -134,7 +135,28 @@ export class Daemon {
         }
         void this.deleteSession(client, msg);
         return;
+      case "pendingOpen":
+        if (!client.greeted) {
+          this.safeSend(client, { type: "pendingOpenResult", requestId: msg.requestId, ok: false, error: "handshake required" });
+          return;
+        }
+        void this.pendingOpen(client, msg);
+        return;
     }
+  }
+
+  /** Records a session for a window on its folder to open; see pendingOpen.ts. */
+  private async pendingOpen(client: ClientState, msg: Extract<ClientMessage, { type: "pendingOpen" }>): Promise<void> {
+    let error: string | undefined;
+    try {
+      await writePendingOpen(this.opts.home, msg.session, Date.now());
+      this.log(`${msg.session.agent}: pending open of ${msg.session.id} in ${msg.session.cwd}`);
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      this.log(`${msg.session.agent}: pending open of ${msg.session.id} failed: ${error}`);
+    }
+    if (this.stopped) return;
+    this.safeSend(client, error === undefined ? { type: "pendingOpenResult", requestId: msg.requestId, ok: true } : { type: "pendingOpenResult", requestId: msg.requestId, ok: false, error });
   }
 
   /**
