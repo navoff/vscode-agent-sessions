@@ -126,13 +126,15 @@ test("--listen on a live socket fails and leaves the live daemon's pid file alon
   assert.equal(await readFile(join(home, "daemon.pid"), "utf8"), "12345");
 });
 
+const CID = "0199a1b2-c3d4-7e5f-8a9b-0123456789ab";
+
 test("stdio delete runs CODEX_BIN, answers deleteResult and then reports the removal", async () => {
   const home = await mkdtemp(join(tmpdir(), "home-"));
   const day = join(home, ".codex", "sessions", "2026", "09", "28");
   await mkdir(join(home, ".claude", "sessions"), { recursive: true });
   await mkdir(day, { recursive: true });
-  const rollout = join(day, "rollout-x-u1.jsonl");
-  await writeFile(rollout, JSON.stringify({ type: "session_meta", payload: { id: "u1", timestamp: "2026-09-28T09:00:00.000Z", cwd: "/w", thread_source: "user" } }) + "\n");
+  const rollout = join(day, `rollout-x-${CID}.jsonl`);
+  await writeFile(rollout, JSON.stringify({ type: "session_meta", payload: { id: CID, timestamp: "2026-09-28T09:00:00.000Z", cwd: "/w", thread_source: "user" } }) + "\n");
   // Stands in for `codex delete`: records its arguments and CODEX_HOME, removes the rollout.
   const fake = join(home, "fake-codex");
   await writeFile(fake, `#!/bin/sh\necho "$* $CODEX_HOME" > "${join(home, "args")}"\nrm -f "${rollout}"\n`);
@@ -156,7 +158,7 @@ test("stdio delete runs CODEX_BIN, answers deleteResult and then reports the rem
   const until = async (pred: () => boolean) => { while (!pred()) await new Promise<void>((r) => (waiter = r)); };
   child.stdin.write('{"type":"hello","protocol":2}\n{"type":"snapshot"}\n');
   await until(() => lines.some((l) => l.type === "snapshot"));
-  child.stdin.write('{"type":"delete","requestId":"r1","agent":"codex","id":"u1"}\n{"type":"delete","requestId":"r2","agent":"opencode","id":"x"}\n');
+  child.stdin.write(`{"type":"delete","requestId":"r1","agent":"codex","id":"${CID}"}\n{"type":"delete","requestId":"r2","agent":"opencode","id":"x"}\n`);
   await until(() => lines.some((l) => l.type === "changed") && lines.filter((l) => l.type === "deleteResult").length === 2);
   child.stdin.end();
   await new Promise((r) => child.on("close", r));
@@ -164,6 +166,6 @@ test("stdio delete runs CODEX_BIN, answers deleteResult and then reports the rem
   const results = lines.filter((l) => l.type === "deleteResult");
   assert.deepEqual(results.find((l) => l.requestId === "r1"), { type: "deleteResult", requestId: "r1", ok: true });
   assert.deepEqual(results.find((l) => l.requestId === "r2"), { type: "deleteResult", requestId: "r2", ok: false, error: 'unknown agent "opencode"' });
-  assert.deepEqual(lines.find((l) => l.type === "changed")?.removed, ["codex:u1"]);
-  assert.equal((await readFile(join(home, "args"), "utf8")).trim(), `delete --force -- u1 ${join(home, ".codex")}`);
+  assert.deepEqual(lines.find((l) => l.type === "changed")?.removed, [`codex:${CID}`]);
+  assert.equal((await readFile(join(home, "args"), "utf8")).trim(), `delete --force -- ${CID} ${join(home, ".codex")}`);
 });

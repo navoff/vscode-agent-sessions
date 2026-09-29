@@ -345,6 +345,8 @@ test("delete for an unknown agent or a provider without delete answers ok:false"
   const daemon = new Daemon({ providers: [plain], version: "t", home: "/h", debounceMs: 10, pollMs: 60_000 });
   const sent: DaemonMessage[] = [];
   const c = daemon.attach((m) => sent.push(m));
+  c.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  sent.length = 0;
   c.handle({ type: "delete", requestId: "1", agent: "opencode", id: "x" });
   c.handle({ type: "delete", requestId: "2", agent: "claude", id: "x" });
   await tick(10);
@@ -353,6 +355,21 @@ test("delete for an unknown agent or a provider without delete answers ok:false"
     { type: "deleteResult", requestId: "2", ok: false, error: "deleting claude sessions is not supported" },
   ]);
   daemon.stop();
+});
+
+test("delete before a completed hello answers handshake required and deletes nothing", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1")];
+  const fresh = h.attach();
+  fresh.client.handle({ type: "delete", requestId: "r0", agent: "codex", id: "u1" });
+  const wrong = h.attach();
+  wrong.client.handle({ type: "hello", protocol: PROTOCOL_VERSION + 1 });
+  wrong.client.handle({ type: "delete", requestId: "r1", agent: "codex", id: "u1" });
+  await tick(30);
+  assert.deepEqual(fresh.sent, [{ type: "deleteResult", requestId: "r0", ok: false, error: "handshake required" }]);
+  assert.ok(!wrong.sent.some((m) => m.type === "deleteResult"));
+  assert.deepEqual(h.codex.deleted, []);
+  h.daemon.stop();
 });
 
 test("a delete finishing after the requester detached sends it nothing", async () => {

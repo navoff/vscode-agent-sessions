@@ -36,6 +36,8 @@ interface ClientState {
   send: (msg: DaemonMessage) => void;
   synced: boolean;
   detached: boolean;
+  /** Completed hello with the right protocol; deleting needs it. */
+  greeted: boolean;
 }
 
 export class Daemon {
@@ -67,7 +69,7 @@ export class Daemon {
   }
 
   attach(send: (msg: DaemonMessage) => void): DaemonClient {
-    const state: ClientState = { send, synced: false, detached: false };
+    const state: ClientState = { send, synced: false, detached: false, greeted: false };
     this.clients.add(state);
     const detach = () => this.detachClient(state);
     return {
@@ -107,6 +109,7 @@ export class Daemon {
           this.detachClient(client);
           return;
         }
+        client.greeted = true;
         this.safeSend(client, {
           type: "hello",
           protocol: PROTOCOL_VERSION,
@@ -125,6 +128,10 @@ export class Daemon {
         this.stop("shutdown requested");
         return;
       case "delete":
+        if (!client.greeted) {
+          this.safeSend(client, { type: "deleteResult", requestId: msg.requestId, ok: false, error: "handshake required" });
+          return;
+        }
         void this.deleteSession(client, msg);
         return;
     }
