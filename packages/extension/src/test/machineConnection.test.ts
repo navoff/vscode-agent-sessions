@@ -111,3 +111,44 @@ test("createStderrTail keeps the last five lines", () => {
   t.push("ve\nsix\nseven");
   assert.equal(t.text(), "three | four | five | six | seven");
 });
+
+test("an async factory reaches connected", async () => {
+  const procs: FakeProc[] = [];
+  const conn = new MachineConnection("m", async () => { const p = new FakeProc(); procs.push(p); return p; },
+    { onStateChange: () => {}, onSessions: () => {} },
+    { autoReconnect: false, clientOptions: { pingIntervalMs: 1000, pongTimeoutMs: 1000, helloTimeoutMs: 1000 } });
+  conn.connect();
+  await tick(10);
+  assert.equal(procs.length, 1);
+  assert.deepEqual(procs[0].received, ['{"type":"hello","protocol":1}']);
+  procs[0].stdout.write(hello);
+  await tick(10);
+  assert.equal(conn.state, "connected");
+  conn.requestShutdown();
+  await tick(5);
+  assert.equal(procs[0].received.at(-1), '{"type":"shutdown"}');
+  conn.dispose();
+});
+
+test("a rejecting async factory is reported as error", async () => {
+  const conn = new MachineConnection("m", async () => { throw new Error("socket gone"); },
+    { onStateChange: () => {}, onSessions: () => {} }, { autoReconnect: false });
+  conn.connect();
+  await tick(10);
+  assert.equal(conn.state, "error");
+  assert.equal(conn.error, "socket gone");
+});
+
+test("disconnect before an async factory resolves kills the late process", async () => {
+  let resolve: ((p: FakeProc) => void) | undefined;
+  const conn = new MachineConnection("m", () => new Promise<DaemonProcess>((r) => { resolve = r; }),
+    { onStateChange: () => {}, onSessions: () => {} }, { autoReconnect: false });
+  conn.connect();
+  await tick(5);
+  conn.disconnect();
+  const p = new FakeProc();
+  resolve?.(p);
+  await tick(5);
+  assert.ok(p.killed);
+  assert.equal(conn.state, "disconnected");
+});

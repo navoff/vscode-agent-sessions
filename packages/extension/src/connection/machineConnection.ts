@@ -31,7 +31,7 @@ export function createStderrTail(max = 5): { push(chunk: string | Buffer): void;
   };
 }
 
-export type ProcessFactory = () => DaemonProcess;
+export type ProcessFactory = () => DaemonProcess | Promise<DaemonProcess>;
 
 export interface MachineConnectionEvents {
   onStateChange(state: MachineState, error?: string): void;
@@ -58,6 +58,8 @@ export class MachineConnection {
   private attempt = 0;
   private retryTimer: NodeJS.Timeout | undefined;
   private wantConnected = false;
+  /** Bumped on every open and teardown, so a factory that resolves late is discarded. */
+  private generation = 0;
 
   constructor(
     readonly machineId: string,
@@ -86,15 +88,32 @@ export class MachineConnection {
     this.disconnect();
   }
 
+  /** Asks the connected daemon to exit; no-op without a live client. */
+  requestShutdown(): void {
+    this.client?.sendShutdown();
+  }
+
   private open(): void {
     this.setState("connecting");
-    let proc: DaemonProcess;
-    try {
-      proc = this.factory();
-    } catch (err) {
-      this.onFailure(String(err instanceof Error ? err.message : err));
-      return;
-    }
+    const gen = ++this.generation;
+    Promise.resolve()
+      .then(() => this.factory())
+      .then(
+        (proc) => {
+          if (gen !== this.generation || !this.wantConnected) {
+            proc.kill();
+            return;
+          }
+          this.attach(proc);
+        },
+        (err: unknown) => {
+          if (gen !== this.generation) return;
+          this.onFailure(String(err instanceof Error ? err.message : err));
+        },
+      );
+  }
+
+  private attach(proc: DaemonProcess): void {
     this.proc = proc;
     proc.onExit((code) => {
       if (this.proc !== proc) return;
@@ -144,6 +163,7 @@ export class MachineConnection {
   }
 
   private teardown(): void {
+    this.generation++;
     const client = this.client;
     const proc = this.proc;
     this.client = undefined;

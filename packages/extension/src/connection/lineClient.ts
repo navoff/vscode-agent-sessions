@@ -56,6 +56,11 @@ export class LineClient {
     this.close();
   }
 
+  /** Asks the daemon to exit even though other clients may be attached. */
+  sendShutdown(): void {
+    this.send({ type: "shutdown" });
+  }
+
   private send(msg: ClientMessage): void {
     if (this.closed) return;
     try {

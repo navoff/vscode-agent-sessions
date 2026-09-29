@@ -117,3 +117,11 @@ test("an unparsable line is a warning and does not close the connection", async 
   assert.deepEqual(h.calls, ["warning:ignoring unparsable line: Welcome to my shell", "hello:1.2.3", "warning:ignoring unparsable line: not json", "snapshot:0"]);
   h.client.dispose();
 });
+
+test("sendShutdown writes a shutdown message to the daemon", async () => {
+  const h = harness();
+  h.client.sendShutdown();
+  await tick(5);
+  assert.deepEqual(h.sentToDaemon, ['{"type":"shutdown"}']);
+  h.client.dispose();
+});
