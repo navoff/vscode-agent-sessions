@@ -29,10 +29,11 @@ test("relativeTime formats coarse buckets", () => {
 
 test("sessionDescription and icon reflect status, unread and hidden", () => {
   const now = 1000 + 60_000 * 7;
-  assert.equal(sessionDescription(row("local", s("a", { status: "running" })), now), "running");
-  assert.equal(sessionDescription(row("local", s("a"), { unread: true }), now), "● 7 min ago");
+  assert.equal(sessionDescription(row("local", s("a", { status: "running" })), now), "● running");
+  assert.equal(sessionDescription(row("local", s("a"), { unread: true }), now), "7 min ago");
   assert.equal(sessionDescription(row("local", s("a"), { hidden: true }), now), "hidden · 7 min ago");
-  assert.equal(sessionIconName(row("local", s("a", { status: "running" }))), "claude-running");
+  assert.equal(sessionIconName(row("local", s("a", { status: "running" }))), "claude");
+  assert.equal(sessionIconName(row("local", s("a"), { unread: true })), "claude-unread");
   assert.equal(sessionIconName(row("local", s("a", { agent: "codex" }), { hidden: true })), "codex-hidden");
   assert.equal(sessionIconName(row("local", s("a"))), "claude");
 });

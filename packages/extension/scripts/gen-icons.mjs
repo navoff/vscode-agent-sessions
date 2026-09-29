@@ -9,7 +9,7 @@ mkdirSync("resources", { recursive: true });
 
 function icon(color, letter, fg, variant) {
   const opacity = variant === "hidden" ? "0.4" : "1";
-  const dot = variant === "running" ? `<circle cx="13" cy="3" r="3" fill="#3FB950" stroke="#0d1117" stroke-width="0.8"/>` : "";
+  const dot = variant === "unread" ? `<circle cx="13" cy="3" r="3" fill="#3FB950" stroke="#0d1117" stroke-width="0.8"/>` : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
 <g opacity="${opacity}"><rect x="1" y="1" width="14" height="14" rx="3" fill="${color}"/>
 <text x="8" y="11.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="${fg}">${letter}</text></g>${dot}
@@ -19,7 +19,7 @@ function icon(color, letter, fg, variant) {
 
 for (const [agent, [color, letter, fg]] of Object.entries(agents)) {
   writeFileSync(`resources/${agent}.svg`, icon(color, letter, fg, "plain"));
-  writeFileSync(`resources/${agent}-running.svg`, icon(color, letter, fg, "running"));
+  writeFileSync(`resources/${agent}-unread.svg`, icon(color, letter, fg, "unread"));
   writeFileSync(`resources/${agent}-hidden.svg`, icon(color, letter, fg, "hidden"));
 }
 

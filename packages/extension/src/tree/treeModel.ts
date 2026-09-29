@@ -63,14 +63,14 @@ export function relativeTime(ts: number, now: number): string {
 export function sessionDescription(row: SessionRow, now: number): string {
   const parts: string[] = [];
   if (row.hidden) parts.push("hidden");
-  if (row.session.status === "running") parts.push("running");
-  else parts.push((row.unread ? "● " : "") + relativeTime(row.session.updatedAt, now));
+  if (row.session.status === "running") parts.push("● running");
+  else parts.push(relativeTime(row.session.updatedAt, now));
   return parts.join(" · ");
 }
 
 export function sessionIconName(row: SessionRow): string {
   if (row.hidden) return `${row.session.agent}-hidden`;
-  if (row.session.status === "running") return `${row.session.agent}-running`;
+  if (row.unread) return `${row.session.agent}-unread`;
   return row.session.agent;
 }
 
