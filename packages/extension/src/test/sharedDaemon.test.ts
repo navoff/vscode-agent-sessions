@@ -5,7 +5,7 @@ import { chmod, mkdtemp, readFile, writeFile, utimes, stat } from "node:fs/promi
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, daemonProcessAlive, ensurePrivateDir, ensureSharedDaemon, readDaemonPid, stopDaemonProcess, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
+import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, daemonProcessAlive, ensurePrivateDir, ensureSharedDaemon, readDaemonPid, rotateLog, stopDaemonProcess, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
 
 test("socketDir prefers XDG_RUNTIME_DIR and falls back to home", () => {
   assert.equal(socketDir({ XDG_RUNTIME_DIR: "/run/user/1" }, "/home/u"), "/run/user/1/agent-sessions");
@@ -271,4 +271,18 @@ test("ensurePrivateDir creates 0700 directories and narrows an existing 0755 one
   await chmod(old, 0o755);
   await ensurePrivateDir(old);
   assert.equal((await stat(old)).mode & 0o777, 0o700);
+});
+
+test("rotateLog moves a log over the limit to .1 and keeps a small one", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "as-rotate-"));
+  const log = join(dir, "daemon.log");
+  await rotateLog(log, 10);
+  await writeFile(log, "small");
+  await rotateLog(log, 10);
+  assert.equal(await readFile(log, "utf8"), "small");
+  await writeFile(`${log}.1`, "older");
+  await writeFile(log, "more than ten bytes");
+  await rotateLog(log, 10);
+  await assert.rejects(stat(log));
+  assert.equal(await readFile(`${log}.1`, "utf8"), "more than ten bytes");
 });

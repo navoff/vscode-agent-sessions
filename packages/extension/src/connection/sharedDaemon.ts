@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { openSync, closeSync, readFileSync } from "node:fs";
-import { chmod, lstat, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -206,6 +206,17 @@ export async function ensureSharedDaemon(opts: EnsureOptions): Promise<Socket> {
   throw new Error(`shared daemon did not come up at ${socket} within ${timeoutMs} ms${tail ? `: ${tail}` : ""}`);
 }
 
+const MAX_LOG_BYTES = 1024 * 1024;
+
+/** Moves `logPath` to `<logPath>.1`, replacing it, once the log is larger than `maxBytes`. */
+export async function rotateLog(logPath: string, maxBytes = MAX_LOG_BYTES): Promise<void> {
+  try {
+    if ((await stat(logPath)).size > maxBytes) await rename(logPath, `${logPath}.1`);
+  } catch {
+    // no log yet
+  }
+}
+
 /** Starts the daemon detached from this process, appending its output to `logPath`. */
 export async function spawnDetachedDaemon(
   daemonPath: string,
@@ -214,6 +225,7 @@ export async function spawnDetachedDaemon(
   onError?: (err: Error) => void,
 ): Promise<void> {
   await ensurePrivateDir(dirname(logPath));
+  await rotateLog(logPath);
   const fd = openSync(logPath, "a", 0o600);
   try {
     const child = spawn(process.execPath, [daemonPath, "--listen", socketPath], {
