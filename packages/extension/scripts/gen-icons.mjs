@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const agents = {
-  claude: ["#8A3A12", "A", "#FF9A4D"],
+  claude: ["#4A2A1C", "A", "#FF8A2A"],
   codex: ["#3A3A3A", "C", "#FFFFFF"],
   opencode: ["#7C3AED", "O", "#FFFFFF"],
 };
