@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionInfo, SessionProvider } from "@agent-sessions/core";
 import { Daemon, sameSession } from "../daemon.js";
-import { parseClientMessage, PROTOCOL_VERSION, type DaemonMessage } from "../protocol.js";
+import { parseClientMessage, parseDaemonMessage, PROTOCOL_VERSION, type DaemonMessage } from "../protocol.js";
 
 class FakeProvider implements SessionProvider {
   sessions: SessionInfo[] = [];
@@ -58,6 +58,20 @@ test("parseClientMessage accepts shutdown", () => {
   assert.equal(parseClientMessage('{"type":"nope"}'), undefined);
 });
 
+test("parseClientMessage reads hello with protocol and rejects non-JSON", () => {
+  assert.deepEqual(parseClientMessage('{"type":"hello","protocol":1}'), { type: "hello", protocol: 1 });
+  assert.equal(parseClientMessage('{"type":"hello"}'), undefined);
+  assert.equal(parseClientMessage("not json"), undefined);
+});
+
+test("parseDaemonMessage drops malformed sessions and removed keys", () => {
+  const good = s("claude", "a");
+  const snap = parseDaemonMessage(JSON.stringify({ type: "snapshot", sessions: [good, null, { agent: "claude", id: 5 }] }));
+  assert.deepEqual(snap, { type: "snapshot", sessions: [good] });
+  const changed = parseDaemonMessage(JSON.stringify({ type: "changed", upserted: [null, good], removed: ["claude:x", 3, null] }));
+  assert.deepEqual(changed, { type: "changed", upserted: [good], removed: ["claude:x"] });
+});
+
 test("hello with wrong protocol detaches only that client", () => {
   const h = setup();
   const a = h.attach();
@@ -67,7 +81,7 @@ test("hello with wrong protocol detaches only that client", () => {
   assert.ok(a.client.detached);
   assert.equal(h.daemon.clientCount, 1);
   b.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  assert.equal(b.sent[0].type, "hello");
+  assert.deepEqual(b.sent[0], { type: "hello", protocol: 1, daemonVersion: "t", agents: ["claude", "codex"], home: "/h" });
   assert.equal(h.stopped(), 0);
   h.daemon.stop();
 });
@@ -239,4 +253,26 @@ test("stop during an in-flight refresh sends nothing afterwards", async () => {
 test("sameSession compares the fields that matter", () => {
   assert.ok(sameSession(s("claude", "a"), s("claude", "a")));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { status: "running" })));
+  const live = (pid: number, statusUpdatedAt: number) => s("claude", "a", { live: { pid, statusUpdatedAt } });
+  assert.ok(sameSession(live(1, 10), live(1, 10)));
+  assert.ok(!sameSession(live(1, 10), live(2, 10)));
+  assert.ok(!sameSession(live(1, 10), live(1, 11)));
+  assert.ok(!sameSession(s("claude", "a"), live(1, 10)));
+});
+
+test("a client whose send throws is detached, others still get the message", async () => {
+  const h = setup();
+  h.claude.sessions = [s("claude", "a")];
+  const bad = h.daemon.attach((m) => { if (m.type === "changed") throw new Error("socket gone"); });
+  const good = h.attach();
+  bad.handle({ type: "snapshot" });
+  good.client.handle({ type: "snapshot" });
+  await tick(30);
+  h.claude.sessions = [s("claude", "a", { status: "running" })];
+  h.claude.trigger();
+  await tick(60);
+  assert.ok(bad.detached);
+  assert.equal(h.daemon.clientCount, 1);
+  assert.equal(good.sent.filter((m) => m.type === "changed").length, 1);
+  h.daemon.stop();
 });

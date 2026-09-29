@@ -1,9 +1,11 @@
 import { createInterface } from "node:readline";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ClaudeProvider, CodexProvider } from "@agent-sessions/core";
 import { Daemon } from "./daemon.js";
 import { parseClientMessage, type DaemonMessage } from "./protocol.js";
+import { removeStaleSocket, serveOnSocket, type SocketServer } from "./server.js";
 
 declare const __DAEMON_VERSION__: string | undefined;
 const VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : "0.0.0-dev";
@@ -14,6 +16,8 @@ const VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : "0
 // before exiting anyway; stop() only runs after the wait, since stopping first
 // would suppress the pending send.
 const EXIT_GRACE_MS = 5000;
+// In --listen mode the daemon stops once it has had no clients for this long.
+const IDLE_TIMEOUT_MS = 60_000;
 
 export function main(argv: string[]): void {
   if (argv.includes("--version")) {
@@ -26,6 +30,33 @@ export function main(argv: string[]): void {
     new ClaudeProvider({ claudeDir: process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"), log }),
     new CodexProvider({ codexDir: process.env.CODEX_HOME ?? join(home, ".codex"), log }),
   ];
+
+  const listenAt = argv.indexOf("--listen");
+  if (listenAt >= 0) {
+    const socketPath = argv[listenAt + 1];
+    if (!socketPath) {
+      process.stderr.write("usage: daemon.mjs --listen <socket path>\n");
+      process.exit(2);
+    }
+    void (async () => {
+      await mkdir(dirname(socketPath), { recursive: true });
+      await removeStaleSocket(socketPath);
+      let server!: SocketServer;
+      const daemon = new Daemon({ providers, version: VERSION, home, log, onStop: () => server.finish() });
+      server = await serveOnSocket(daemon, socketPath, { idleTimeoutMs: IDLE_TIMEOUT_MS, log });
+      log(`listening on ${socketPath}`);
+      const stop = () => daemon.stop();
+      process.on("SIGTERM", stop);
+      process.on("SIGINT", stop);
+      await server.close();
+      process.exit(0);
+    })().catch((err) => {
+      log(`listen failed: ${String(err)}`);
+      process.exit(1);
+    });
+    return;
+  }
+
   const send = (m: DaemonMessage) => {
     process.stdout.write(JSON.stringify(m) + "\n");
   };
@@ -35,8 +66,9 @@ export function main(argv: string[]): void {
     exiting = true;
     process.exit(0);
   };
-  // stop() also runs on a protocol mismatch; exit on the next turn so the
-  // error reply written just before is flushed.
+  // stop() runs on "shutdown"; exit on the next turn so anything written just
+  // before is flushed. A protocol mismatch only detaches the client and is
+  // handled in the line handler below.
   const daemon = new Daemon({ providers, version: VERSION, home, log, onStop: () => setImmediate(exit) });
   const client = daemon.attach(send);
   const rl = createInterface({ input: process.stdin });

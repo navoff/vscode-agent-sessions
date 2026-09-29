@@ -65,3 +65,22 @@ test("protocol mismatch answers error and exits promptly with stdin still open",
   assert.equal(r.code, 0);
   assert.ok(elapsed < 2000, `expected prompt exit, took ${elapsed}ms`);
 });
+
+test("--listen serves a socket and exits on shutdown", async () => {
+  const home = await mkdtemp(join(tmpdir(), "home-"));
+  const sock = join(home, "d.sock");
+  const child = spawn(process.execPath, [bundle, "--listen", sock], { env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") }, stdio: ["ignore", "pipe", "pipe"] });
+  const exited = new Promise<number | null>((r) => child.on("close", r));
+  const { connect } = await import("node:net");
+  let socket: import("node:net").Socket | undefined;
+  for (let i = 0; i < 50 && !socket; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    socket = await new Promise((res) => { const s = connect(sock); s.once("connect", () => res(s)); s.once("error", () => res(undefined)); });
+  }
+  assert.ok(socket, "socket did not come up");
+  const line = new Promise<string>((r) => { let buf = ""; socket!.on("data", (d) => { buf += d; const i = buf.indexOf("\n"); if (i >= 0) r(buf.slice(0, i)); }); });
+  socket.write('{"type":"hello","protocol":1}\n');
+  assert.equal(JSON.parse(await line).type, "hello");
+  socket.write('{"type":"shutdown"}\n');
+  assert.equal(await exited, 0);
+});

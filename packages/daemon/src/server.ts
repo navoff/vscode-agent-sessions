@@ -1,0 +1,107 @@
+import { createServer, connect, type Server, type Socket } from "node:net";
+import { unlink } from "node:fs/promises";
+import { createInterface } from "node:readline";
+import type { Daemon } from "./daemon.js";
+import { parseClientMessage } from "./protocol.js";
+
+export interface SocketServerOptions {
+  idleTimeoutMs: number;
+  log: (msg: string) => void;
+}
+
+export interface SocketServer {
+  readonly address: string;
+  /** Call from the daemon's onStop: ends every socket and closes the server. */
+  finish(): void;
+  /** Resolves once finish() has closed the server and removed the socket file. */
+  close(): Promise<void>;
+}
+
+/** Deletes `path` when nothing listens on it. A live socket is left alone. */
+export async function removeStaleSocket(path: string): Promise<void> {
+  const alive = await new Promise<boolean>((resolve) => {
+    const s = connect(path);
+    s.once("connect", () => {
+      s.destroy();
+      resolve(true);
+    });
+    s.once("error", (err: NodeJS.ErrnoException) => resolve(err.code !== "ECONNREFUSED" && err.code !== "ENOENT"));
+  });
+  if (alive) return;
+  try {
+    await unlink(path);
+  } catch {
+    // already gone
+  }
+}
+
+export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketServerOptions): Promise<SocketServer> {
+  const sockets = new Set<Socket>();
+  let idleTimer: NodeJS.Timeout | undefined;
+  let finished = false;
+  let closedResolve!: () => void;
+  const closed = new Promise<void>((r) => (closedResolve = r));
+
+  const armIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (daemon.clientCount === 0) {
+        opts.log("no clients, stopping");
+        daemon.stop();
+      }
+    }, opts.idleTimeoutMs);
+  };
+
+  const server: Server = createServer((socket) => {
+    // A connection accepted while finishing must not attach to a stopped daemon.
+    if (finished) {
+      socket.on("error", () => {});
+      socket.destroy();
+      return;
+    }
+    sockets.add(socket);
+    if (idleTimer) clearTimeout(idleTimer);
+    const client = daemon.attach((m) => {
+      if (!socket.destroyed) socket.write(JSON.stringify(m) + "\n");
+    });
+    const rl = createInterface({ input: socket });
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
+      const msg = parseClientMessage(line);
+      if (!msg) {
+        socket.write(JSON.stringify({ type: "error", message: `bad message: ${line.slice(0, 200)}` }) + "\n");
+        return;
+      }
+      client.handle(msg);
+      if (client.detached) socket.end();
+    });
+    socket.on("close", () => {
+      sockets.delete(socket);
+      client.detach();
+      if (!finished && daemon.clientCount === 0) armIdle();
+    });
+    socket.on("error", (err) => opts.log(`socket error: ${String(err)}`));
+  });
+
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (idleTimer) clearTimeout(idleTimer);
+    for (const s of sockets) s.end();
+    server.close(() => {
+      void unlink(socketPath)
+        .catch(() => {})
+        .then(() => closedResolve());
+    });
+  };
+
+  return new Promise<SocketServer>((resolveServer, rejectServer) => {
+    server.once("error", rejectServer);
+    server.listen(socketPath, () => {
+      server.off("error", rejectServer);
+      server.on("error", (err) => opts.log(`server error: ${String(err)}`));
+      armIdle();
+      resolveServer({ address: socketPath, finish, close: () => closed });
+    });
+  });
+}

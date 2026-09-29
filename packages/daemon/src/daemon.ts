@@ -10,7 +10,7 @@ export interface DaemonOptions {
   log?: (msg: string) => void;
   /** Called once, at the end of the first stop(). */
   onStop?: () => void;
-  /** Called whenever the last client detaches. */
+  /** Called whenever the last client detaches. Not called from stop(). */
   onIdle?: () => void;
 }
 
@@ -87,16 +87,27 @@ export class Daemon {
     if (this.clients.size === 0) this.opts.onIdle?.();
   }
 
+  /** A throwing send means the client's transport is gone: drop that client. */
+  private safeSend(client: ClientState, msg: DaemonMessage): void {
+    if (client.detached) return;
+    try {
+      client.send(msg);
+    } catch (err) {
+      this.log(`send failed, detaching client: ${String(err)}`);
+      this.detachClient(client);
+    }
+  }
+
   private handleFrom(client: ClientState, msg: ClientMessage): void {
     if (this.stopped || client.detached) return;
     switch (msg.type) {
       case "hello":
         if (msg.protocol !== PROTOCOL_VERSION) {
-          client.send({ type: "error", message: `unsupported protocol ${msg.protocol}, daemon speaks ${PROTOCOL_VERSION}` });
+          this.safeSend(client, { type: "error", message: `unsupported protocol ${msg.protocol}, daemon speaks ${PROTOCOL_VERSION}` });
           this.detachClient(client);
           return;
         }
-        client.send({
+        this.safeSend(client, {
           type: "hello",
           protocol: PROTOCOL_VERSION,
           daemonVersion: this.opts.version,
@@ -108,7 +119,7 @@ export class Daemon {
         void this.refresh(client);
         return;
       case "ping":
-        client.send({ type: "pong" });
+        this.safeSend(client, { type: "pong" });
         return;
       case "shutdown":
         this.stop();
@@ -169,8 +180,8 @@ export class Daemon {
     }
     for (const k of this.current.keys()) if (!next.has(k)) removed.push(k);
     if (upserted.length === 0 && removed.length === 0) return;
-    for (const c of this.clients) {
-      if (c.synced && !except.has(c)) c.send({ type: "changed", upserted, removed });
+    for (const c of [...this.clients]) {
+      if (c.synced && !c.detached && !except.has(c)) this.safeSend(c, { type: "changed", upserted, removed });
     }
   }
 
@@ -182,7 +193,8 @@ export class Daemon {
     this.current = next;
     const sessions = [...next.values()];
     for (const c of live) {
-      c.send({ type: "snapshot", sessions });
+      if (c.detached) continue;
+      this.safeSend(c, { type: "snapshot", sessions });
       c.synced = true;
     }
   }
