@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Remote sessions open in a Remote-SSH window on their folder. The daemon
+  protocol is now 3; run Prepare Machine on remote machines after updating.
+- The hand-over of a Claude session to a window on its folder goes through a
+  file on the machine holding the session instead of VS Code's global state.
+
 ## 0.1.0 - 2026-09-29
 
 First release.

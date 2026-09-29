@@ -29,6 +29,8 @@ agents' own session stores instead and stays out of their way.
 - **Remote machines.** Add any host from `~/.ssh/config`. The extension
   installs a small daemon on the remote machine, brings its own Node when the
   host has none, and streams that machine's sessions into the same tree.
+  Double-clicking a remote session opens it in a Remote-SSH window on that
+  machine.
 - **Housekeeping.** Hide sessions you no longer care about, mark them read or
   unread, delete them for good, and apply all of that to a multi-selection.
 - **One daemon per machine.** All VS Code windows share one background
@@ -61,6 +63,7 @@ agents' own session stores instead and stays out of their way.
 | --- | --- |
 | Open a session | Double-click it (or single-click with `agentSessions.openOn` set to `singleClick`). "Open Session" in the context menu always opens immediately. |
 | Open a Claude session of another folder | Claude Code finds only sessions of the folder open in its window and its git worktrees, so such a session offers "Open Folder in New Window", which then opens the session there, or "Resume in Terminal". |
+| Open a remote session | Double-click opens a Remote-SSH window on the session folder of that machine (or focuses the one already open) and opens the session there. The machine's daemon must speak the current protocol; run **Prepare Machine** after updating the extension. |
 | Resume in a terminal | "Resume in Terminal" opens a terminal in the session folder with `claude --resume <id>` or `codex resume <id>` typed in, not run. |
 | Mark read / unread | Context menu. Opening a session marks it read. |
 | Hide / unhide | "Hide Session" removes a session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. |
