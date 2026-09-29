@@ -47,7 +47,8 @@
       { "command": "agentSessions.prepareMachine", "title": "Prepare Machine", "category": "Agent Sessions" },
       { "command": "agentSessions.connectMachine", "title": "Connect", "category": "Agent Sessions", "icon": "$(plug)" },
       { "command": "agentSessions.disconnectMachine", "title": "Disconnect", "category": "Agent Sessions", "icon": "$(debug-disconnect)" },
-      { "command": "agentSessions.showLog", "title": "Show Log", "category": "Agent Sessions" }
+      { "command": "agentSessions.showLog", "title": "Show Log", "category": "Agent Sessions" },
+      { "command": "agentSessions.restartLocalDaemon", "title": "Restart Local Daemon", "category": "Agent Sessions" }
     ],
     "menus": {
       "view/title": [

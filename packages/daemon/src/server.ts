@@ -72,6 +72,7 @@ export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketSe
       return;
     }
     sockets.add(socket);
+    opts.log(`client connected (${sockets.size})`);
     if (idleTimer) clearTimeout(idleTimer);
     const client = daemon.attach((m) => {
       if (!socket.destroyed) socket.write(JSON.stringify(m) + "\n");
@@ -95,6 +96,7 @@ export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketSe
     });
     socket.on("close", () => {
       sockets.delete(socket);
+      opts.log(`client disconnected (${sockets.size})`);
       client.detach();
       if (!finished && daemon.clientCount === 0) armIdle();
     });

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentKind } from "@agent-sessions/core";
 import { MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
-import { spawnLocalDaemon } from "./connection/localConnection.js";
+import { connectLocalDaemon } from "./connection/localConnection.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { registerSessionCommands, type FilterState } from "./commands.js";
@@ -19,6 +19,11 @@ import { SessionsTreeProvider } from "./tree/treeProvider.js";
 
 const LOCAL_ID = "local";
 const FILTER_KEY = "agentSessions.filter";
+const AUTO_RESTART_INTERVAL_MS = 60_000;
+
+// Injected by esbuild from packages/daemon/package.json; absent under tsc.
+declare const __DAEMON_VERSION__: string | undefined;
+const BUNDLED_DAEMON_VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const log = vscode.window.createOutputChannel("Agent Sessions");
@@ -78,7 +83,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (existing) return existing;
     let factory: ProcessFactory;
     if (id === LOCAL_ID) {
-      factory = () => spawnLocalDaemon(daemonPath, appendLog);
+      factory = () => connectLocalDaemon(daemonPath, appendLog);
     } else {
       if (!machines.machines.some((x) => x.id === id)) return undefined;
       factory = () => {
@@ -88,13 +93,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return spawnSshDaemon(sshPath(), m.sshHost, m.remoteNode, remoteDaemonPath(m.remoteHome), appendLog);
       };
     }
-    const conn = new MachineConnection(
+    // Assigned right after construction; the callback reads it later.
+    let conn: MachineConnection | undefined = undefined;
+    conn = new MachineConnection(
       id,
       factory,
       {
         onStateChange: (state, error) => {
           appendLog(`[${id}] ${state}${error ? `: ${error}` : ""}`);
           refresh();
+          if (id === LOCAL_ID && state === "connected") {
+            const running = conn?.daemonVersion;
+            if (BUNDLED_DAEMON_VERSION !== undefined && running !== undefined && running !== BUNDLED_DAEMON_VERSION) {
+              appendLog(`[${id}] local daemon ${running} differs from bundled ${BUNDLED_DAEMON_VERSION}, restarting`);
+              restartLocalDaemon(true);
+            }
+          }
         },
         onSessions: (sessions) => {
           store.setMachineSessions(id, sessions);
@@ -124,6 +138,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const disconnect = (id: string) => {
     dropConnection(id);
     refresh();
+  };
+
+  // Asks the shared daemon to stop and reconnects, which starts a fresh one.
+  // Automatic restarts (version mismatch) are limited to one per minute so
+  // two windows with different bundled versions cannot restart it in a loop.
+  let lastAutoRestart = 0;
+  let restartTimer: ReturnType<typeof setTimeout> | undefined;
+  const restartLocalDaemon = (auto: boolean) => {
+    if (auto && Date.now() - lastAutoRestart < AUTO_RESTART_INTERVAL_MS) {
+      appendLog(`[${LOCAL_ID}] auto restart suppressed`);
+      return;
+    }
+    if (auto) lastAutoRestart = Date.now();
+    appendLog(`[${LOCAL_ID}] restarting local daemon`);
+    connections.get(LOCAL_ID)?.requestShutdown();
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = setTimeout(() => {
+      restartTimer = undefined;
+      dropConnection(LOCAL_ID);
+      connect(LOCAL_ID);
+    }, 500);
   };
 
   const reloadMachinesOnce = async () => {
@@ -224,10 +259,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("agentSessions.restartLocalDaemon", () => restartLocalDaemon(false)),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("agentSessions")) refresh();
     }),
-    { dispose: () => { if (reloadTimer) clearTimeout(reloadTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
+    { dispose: () => { if (reloadTimer) clearTimeout(reloadTimer); if (restartTimer) clearTimeout(restartTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
     log,
   );
 
