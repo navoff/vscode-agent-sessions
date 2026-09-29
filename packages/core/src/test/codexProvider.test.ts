@@ -190,3 +190,25 @@ test("delete refuses a non-UUID id without running anything and allows an unknow
   await p.delete("00000000-0000-4000-8000-000000000000");
   assert.equal(r.calls.length, 1);
 });
+
+test("delete refuses a thread whose writer lock is held and names the process", async () => {
+  const { dir } = await makeDeleteDir();
+  const lockDir = join(dir, "thread-writer-locks");
+  await mkdir(lockDir, { recursive: true });
+  const lock = join(lockDir, `${CID}.lock`);
+  await writeFile(lock, "");
+  const st = await stat(lock);
+  const major = (Math.floor(st.dev / 256) & 0xfff).toString(16);
+  const minor = ((st.dev & 0xff) | (Math.floor(st.dev / 4096) & 0xfff00)).toString(16);
+  const locks = join(dir, "proc-locks");
+  await writeFile(locks, `224: FLOCK  ADVISORY  WRITE 601322 ${major}:${minor}:${st.ino} 0 EOF\n`);
+  const r = recorder([]);
+  const p = new CodexProvider({ codexDir: dir, runCommand: r.run, procLocksPath: locks });
+  await p.snapshot();
+  await assert.rejects(() => p.delete(CID), /open in Codex \(process 601322\).*Close it in Codex/);
+  assert.equal(r.calls.length, 0);
+  // An unheld lock file does not block deletion.
+  await writeFile(locks, "");
+  await p.delete(CID);
+  assert.equal(r.calls.length, 1);
+});

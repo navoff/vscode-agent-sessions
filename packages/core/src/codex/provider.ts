@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
+import { fileLockHolder } from "../util/fileLock.js";
 import { isValidSessionId } from "../util/sessionId.js";
 import { guardWatcher } from "../util/watch.js";
 import { listRolloutFiles } from "./discovery.js";
@@ -52,6 +53,8 @@ export interface CodexProviderOptions {
   /** Replaces execFile; for tests. */
   runCommand?: CommandRunner;
   deleteTimeoutMs?: number;
+  /** Where to read kernel file locks from; for tests. Default /proc/locks. */
+  procLocksPath?: string;
 }
 
 interface CacheEntry {
@@ -68,6 +71,7 @@ export class CodexProvider implements SessionProvider {
   private readonly env: NodeJS.ProcessEnv;
   private readonly runCommand: CommandRunner;
   private readonly deleteTimeoutMs: number;
+  private readonly procLocksPath: string | undefined;
 
   constructor(opts: CodexProviderOptions = {}) {
     this.codexDir = opts.codexDir ?? join(homedir(), ".codex");
@@ -75,6 +79,7 @@ export class CodexProvider implements SessionProvider {
     this.env = opts.env ?? process.env;
     this.runCommand = opts.runCommand ?? execFileRunner;
     this.deleteTimeoutMs = opts.deleteTimeoutMs ?? DELETE_TIMEOUT_MS;
+    this.procLocksPath = opts.procLocksPath;
   }
 
   async snapshot(): Promise<SessionInfo[]> {
@@ -133,6 +138,14 @@ export class CodexProvider implements SessionProvider {
   async delete(id: string): Promise<void> {
     if (!isValidSessionId(id)) throw new Error(`invalid Codex session id ${JSON.stringify(id.slice(0, 80))}`);
     if (await this.isRunningNow(id)) throw new Error("the session is running, wait until it finishes or stop it before deleting");
+    // A Codex process that has the thread open (the VS Code plugin, a TUI)
+    // holds its writer lock, and codex delete fails with a truncated error.
+    const holder = await fileLockHolder(join(this.codexDir, "thread-writer-locks", `${id.toLowerCase()}.lock`), this.procLocksPath);
+    if (holder !== undefined) {
+      throw new Error(
+        `the session is open in Codex (process ${holder}). Close it in Codex, or reload the VS Code window that has it open, then try again`,
+      );
+    }
     // --force skips the interactive confirmation; the user confirmed in VS Code.
     const args = ["delete", "--force", "--", id];
     const opts = { env: { ...this.env, CODEX_HOME: this.codexDir }, timeoutMs: this.deleteTimeoutMs };
