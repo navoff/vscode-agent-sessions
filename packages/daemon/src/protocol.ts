@@ -1,12 +1,15 @@
 import type { AgentKind, SessionInfo } from "@agent-sessions/core";
 
-export const PROTOCOL_VERSION = 1;
+/** 2 added "delete" and "deleteResult". */
+export const PROTOCOL_VERSION = 2;
 
 export type ClientMessage =
   | { type: "hello"; protocol: number }
   | { type: "snapshot" }
   | { type: "ping" }
-  | { type: "shutdown" };
+  | { type: "shutdown" }
+  /** Permanently deletes a session; answered by "deleteResult" with the same requestId. */
+  | { type: "delete"; requestId: string; agent: string; id: string };
 
 export interface HelloInfo {
   protocol: number;
@@ -20,6 +23,7 @@ export type DaemonMessage =
   | { type: "snapshot"; sessions: SessionInfo[] }
   | { type: "changed"; upserted: SessionInfo[]; removed: string[] }
   | { type: "pong" }
+  | { type: "deleteResult"; requestId: string; ok: boolean; error?: string }
   | { type: "error"; message: string };
 
 export function parseClientMessage(line: string): ClientMessage | undefined {
@@ -30,7 +34,7 @@ export function parseClientMessage(line: string): ClientMessage | undefined {
     return undefined;
   }
   if (typeof raw !== "object" || raw === null) return undefined;
-  const r = raw as { type?: unknown; protocol?: unknown };
+  const r = raw as Record<string, unknown>;
   switch (r.type) {
     case "hello":
       return typeof r.protocol === "number" ? { type: "hello", protocol: r.protocol } : undefined;
@@ -40,6 +44,10 @@ export function parseClientMessage(line: string): ClientMessage | undefined {
       return { type: "ping" };
     case "shutdown":
       return { type: "shutdown" };
+    case "delete":
+      return typeof r.requestId === "string" && typeof r.agent === "string" && typeof r.id === "string"
+        ? { type: "delete", requestId: r.requestId, agent: r.agent, id: r.id }
+        : undefined;
     default:
       return undefined;
   }
@@ -83,6 +91,12 @@ export function parseDaemonMessage(line: string): DaemonMessage | undefined {
         : undefined;
     case "pong":
       return { type: "pong" };
+    case "deleteResult": {
+      if (typeof r.requestId !== "string" || typeof r.ok !== "boolean") return undefined;
+      const msg: DaemonMessage = { type: "deleteResult", requestId: r.requestId, ok: r.ok };
+      if (typeof r.error === "string") msg.error = r.error;
+      return msg;
+    }
     case "error":
       return { type: "error", message: typeof r.message === "string" ? r.message : "unknown error" };
     default:

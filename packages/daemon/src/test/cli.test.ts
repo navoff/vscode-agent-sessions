@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,7 +45,7 @@ test("stdio session answers hello and snapshot, exits on stdin close", async () 
     JSON.stringify({ type: "session_meta", payload: { id: "u1", timestamp: "2026-09-28T09:00:00.000Z", cwd: "/w", thread_source: "user" } }) + "\n",
   );
   const r = await run(["--stdio"], { HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex") },
-    '{"type":"hello","protocol":1}\n{"type":"snapshot"}\n');
+    '{"type":"hello","protocol":2}\n{"type":"snapshot"}\n');
   const lines = r.out.trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(lines[0].type, "hello");
   assert.equal(lines[1].type, "snapshot");
@@ -81,7 +81,7 @@ test("--listen serves a socket and exits on shutdown", async () => {
   }
   assert.ok(socket, "socket did not come up");
   const line = new Promise<string>((r) => { let buf = ""; socket!.on("data", (d) => { buf += d; const i = buf.indexOf("\n"); if (i >= 0) r(buf.slice(0, i)); }); });
-  socket.write('{"type":"hello","protocol":1}\n');
+  socket.write('{"type":"hello","protocol":2}\n');
   const hello = JSON.parse(await line);
   assert.equal(hello.type, "hello");
   assert.match(hello.daemonVersion, /^\d+\.\d+\.\d+\+[0-9a-f]{12}$/);
@@ -124,4 +124,46 @@ test("--listen on a live socket fails and leaves the live daemon's pid file alon
   assert.equal(r.code, 1);
   assert.match(r.err, /listen failed/);
   assert.equal(await readFile(join(home, "daemon.pid"), "utf8"), "12345");
+});
+
+test("stdio delete runs CODEX_BIN, answers deleteResult and then reports the removal", async () => {
+  const home = await mkdtemp(join(tmpdir(), "home-"));
+  const day = join(home, ".codex", "sessions", "2026", "09", "28");
+  await mkdir(join(home, ".claude", "sessions"), { recursive: true });
+  await mkdir(day, { recursive: true });
+  const rollout = join(day, "rollout-x-u1.jsonl");
+  await writeFile(rollout, JSON.stringify({ type: "session_meta", payload: { id: "u1", timestamp: "2026-09-28T09:00:00.000Z", cwd: "/w", thread_source: "user" } }) + "\n");
+  // Stands in for `codex delete`: records its arguments and CODEX_HOME, removes the rollout.
+  const fake = join(home, "fake-codex");
+  await writeFile(fake, `#!/bin/sh\necho "$* $CODEX_HOME" > "${join(home, "args")}"\nrm -f "${rollout}"\n`);
+  await chmod(fake, 0o755);
+  const child = spawn(process.execPath, [bundle, "--stdio"], {
+    env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), CODEX_HOME: join(home, ".codex"), CODEX_BIN: fake },
+  });
+  const killer = setTimeout(() => child.kill(), 10_000);
+  const lines: Array<Record<string, unknown>> = [];
+  let buf = "";
+  let waiter: (() => void) | undefined;
+  child.stdout.on("data", (d) => {
+    buf += d;
+    let i: number;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      lines.push(JSON.parse(buf.slice(0, i)));
+      buf = buf.slice(i + 1);
+    }
+    waiter?.();
+  });
+  const until = async (pred: () => boolean) => { while (!pred()) await new Promise<void>((r) => (waiter = r)); };
+  child.stdin.write('{"type":"hello","protocol":2}\n{"type":"snapshot"}\n');
+  await until(() => lines.some((l) => l.type === "snapshot"));
+  child.stdin.write('{"type":"delete","requestId":"r1","agent":"codex","id":"u1"}\n{"type":"delete","requestId":"r2","agent":"opencode","id":"x"}\n');
+  await until(() => lines.some((l) => l.type === "changed") && lines.filter((l) => l.type === "deleteResult").length === 2);
+  child.stdin.end();
+  await new Promise((r) => child.on("close", r));
+  clearTimeout(killer);
+  const results = lines.filter((l) => l.type === "deleteResult");
+  assert.deepEqual(results.find((l) => l.requestId === "r1"), { type: "deleteResult", requestId: "r1", ok: true });
+  assert.deepEqual(results.find((l) => l.requestId === "r2"), { type: "deleteResult", requestId: "r2", ok: false, error: 'unknown agent "opencode"' });
+  assert.deepEqual(lines.find((l) => l.type === "changed")?.removed, ["codex:u1"]);
+  assert.equal((await readFile(join(home, "args"), "utf8")).trim(), `delete --force -- u1 ${join(home, ".codex")}`);
 });

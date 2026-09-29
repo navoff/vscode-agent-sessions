@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import type { SessionInfo } from "@agent-sessions/core";
-import { MachineConnection, createStderrTail, type DaemonProcess, type MachineState } from "../connection/machineConnection.js";
+import { PROTOCOL_VERSION } from "@agent-sessions/daemon";
+import { MachineConnection, createStderrTail, isProtocolMismatch, type DaemonProcess, type MachineState } from "../connection/machineConnection.js";
 
-const hello = '{"type":"hello","protocol":1,"daemonVersion":"9","agents":["claude"],"home":"/h"}\n';
+const hello = `{"type":"hello","protocol":${PROTOCOL_VERSION},"daemonVersion":"9","agents":["claude"],"home":"/h"}\n`;
 const s = (id: string): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle" });
 
 class FakeProc implements DaemonProcess {
@@ -142,7 +143,7 @@ test("an async factory reaches connected", async () => {
   conn.connect();
   await tick(10);
   assert.equal(procs.length, 1);
-  assert.deepEqual(procs[0].received, ['{"type":"hello","protocol":1}']);
+  assert.deepEqual(procs[0].received, [`{"type":"hello","protocol":${PROTOCOL_VERSION}}`]);
   procs[0].stdout.write(hello);
   await tick(10);
   assert.equal(conn.state, "connected");
@@ -173,4 +174,47 @@ test("disconnect before an async factory resolves kills the late process", async
   await tick(5);
   assert.ok(p.killed);
   assert.equal(conn.state, "disconnected");
+});
+
+test("deleteSession goes through the connected daemon and fails when not connected", async () => {
+  const h = harness();
+  await assert.rejects(h.conn.deleteSession("codex", "u1"), /not connected/);
+  h.conn.connect();
+  await tick(5);
+  await assert.rejects(h.conn.deleteSession("codex", "u1"), /not connected/);
+  h.procs[0].stdout.write(hello);
+  await tick(5);
+  const done = h.conn.deleteSession("codex", "u1");
+  await tick(5);
+  const req = JSON.parse(h.procs[0].received.find((l) => l.includes('"delete"'))!);
+  assert.deepEqual([req.agent, req.id], ["codex", "u1"]);
+  h.procs[0].stdout.write(JSON.stringify({ type: "deleteResult", requestId: req.requestId, ok: true }) + "\n");
+  await done;
+  // A request in flight is rejected when the connection goes away.
+  const lost = h.conn.deleteSession("codex", "u2");
+  h.procs[0].exit(1);
+  await assert.rejects(lost, /connection closed/);
+  h.conn.dispose();
+});
+
+test("isProtocolMismatch recognises the daemon's answer to another protocol", () => {
+  assert.equal(isProtocolMismatch("unsupported protocol 2, daemon speaks 1"), true);
+  assert.equal(isProtocolMismatch("daemon exited with code 1"), false);
+  assert.equal(isProtocolMismatch(undefined), false);
+});
+
+test("a protocol mismatch stops reconnecting only when told to", async () => {
+  for (const retry of [false, true]) {
+    const procs: FakeProc[] = [];
+    const conn = new MachineConnection("m", () => { const p = new FakeProc(); procs.push(p); return p; },
+      { onStateChange: () => {}, onSessions: () => {} },
+      { autoReconnect: true, retryOnProtocolMismatch: retry, backoffMs: [10], clientOptions: { pingIntervalMs: 1000, pongTimeoutMs: 1000, helloTimeoutMs: 1000 } });
+    conn.connect();
+    await tick(5);
+    procs[0].stdout.write(JSON.stringify({ type: "error", message: `unsupported protocol ${PROTOCOL_VERSION}, daemon speaks 1` }) + "\n");
+    await tick(40);
+    assert.equal(procs.length, retry ? 2 : 1, `retry=${retry}`);
+    if (!retry) assert.deepEqual([conn.state, conn.error], ["error", `unsupported protocol ${PROTOCOL_VERSION}, daemon speaks 1`]);
+    conn.dispose();
+  }
 });

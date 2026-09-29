@@ -124,7 +124,36 @@ export class Daemon {
       case "shutdown":
         this.stop("shutdown requested");
         return;
+      case "delete":
+        void this.deleteSession(client, msg);
+        return;
     }
+  }
+
+  /**
+   * Deletes a session through its provider and answers only the requester.
+   * On success a refresh sends every synced client, the requester included,
+   * a "changed" with the removal.
+   */
+  private async deleteSession(client: ClientState, msg: Extract<ClientMessage, { type: "delete" }>): Promise<void> {
+    const provider = this.opts.providers.find((p) => p.agent === msg.agent);
+    let error: string | undefined;
+    if (!provider) {
+      error = `unknown agent ${JSON.stringify(msg.agent.slice(0, 40))}`;
+    } else if (!provider.delete) {
+      error = `deleting ${msg.agent} sessions is not supported`;
+    } else {
+      try {
+        await provider.delete(msg.id);
+        this.log(`${msg.agent}: deleted session ${msg.id}`);
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+        this.log(`${msg.agent}: delete ${msg.id} failed: ${error}`);
+      }
+    }
+    if (this.stopped) return;
+    this.safeSend(client, error === undefined ? { type: "deleteResult", requestId: msg.requestId, ok: true } : { type: "deleteResult", requestId: msg.requestId, ok: false, error });
+    if (error === undefined) void this.refresh(undefined);
   }
 
   /** Stops the daemon; `reason` is logged on the first call. */

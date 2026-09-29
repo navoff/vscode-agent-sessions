@@ -9,8 +9,15 @@ class FakeProvider implements SessionProvider {
   fail = false;
   gate: Promise<void> | undefined;
   snapshotCalls = 0;
+  deleted: string[] = [];
+  deleteError: Error | undefined;
   private cb: (() => void) | undefined;
   constructor(readonly agent: "claude" | "codex") {}
+  async delete(id: string): Promise<void> {
+    if (this.deleteError) throw this.deleteError;
+    this.deleted.push(id);
+    this.sessions = this.sessions.filter((x) => x.id !== id);
+  }
   async snapshot(): Promise<SessionInfo[]> {
     this.snapshotCalls++;
     if (this.gate) await this.gate;
@@ -58,6 +65,17 @@ test("parseClientMessage accepts shutdown", () => {
   assert.equal(parseClientMessage('{"type":"nope"}'), undefined);
 });
 
+test("parse delete and deleteResult messages", () => {
+  assert.deepEqual(parseClientMessage('{"type":"delete","requestId":"7","agent":"codex","id":"u1"}'), { type: "delete", requestId: "7", agent: "codex", id: "u1" });
+  assert.equal(parseClientMessage('{"type":"delete","agent":"codex","id":"u1"}'), undefined);
+  assert.equal(parseClientMessage('{"type":"delete","requestId":7,"agent":"codex","id":"u1"}'), undefined);
+  assert.equal(parseClientMessage('{"type":"delete","requestId":"7","agent":"codex"}'), undefined);
+  assert.deepEqual(parseDaemonMessage('{"type":"deleteResult","requestId":"7","ok":true}'), { type: "deleteResult", requestId: "7", ok: true });
+  assert.deepEqual(parseDaemonMessage('{"type":"deleteResult","requestId":"7","ok":false,"error":"no"}'), { type: "deleteResult", requestId: "7", ok: false, error: "no" });
+  assert.equal(parseDaemonMessage('{"type":"deleteResult","requestId":"7"}'), undefined);
+  assert.equal(parseDaemonMessage('{"type":"deleteResult","ok":true}'), undefined);
+});
+
 test("parseClientMessage reads hello with protocol and rejects non-JSON", () => {
   assert.deepEqual(parseClientMessage('{"type":"hello","protocol":1}'), { type: "hello", protocol: 1 });
   assert.equal(parseClientMessage('{"type":"hello"}'), undefined);
@@ -81,7 +99,7 @@ test("hello with wrong protocol detaches only that client", () => {
   assert.ok(a.client.detached);
   assert.equal(h.daemon.clientCount, 1);
   b.client.handle({ type: "hello", protocol: PROTOCOL_VERSION });
-  assert.deepEqual(b.sent[0], { type: "hello", protocol: 1, daemonVersion: "t", agents: ["claude", "codex"], home: "/h" });
+  assert.deepEqual(b.sent[0], { type: "hello", protocol: PROTOCOL_VERSION, daemonVersion: "t", agents: ["claude", "codex"], home: "/h" });
   assert.equal(h.stopped(), 0);
   h.daemon.stop();
 });
@@ -274,5 +292,82 @@ test("a client whose send throws is detached, others still get the message", asy
   assert.ok(bad.detached);
   assert.equal(h.daemon.clientCount, 1);
   assert.equal(good.sent.filter((m) => m.type === "changed").length, 1);
+  h.daemon.stop();
+});
+
+async function syncedPair(h: ReturnType<typeof setup>) {
+  const a = h.attach();
+  const b = h.attach();
+  for (const x of [a, b]) { x.client.handle({ type: "hello", protocol: PROTOCOL_VERSION }); x.client.handle({ type: "snapshot" }); }
+  await tick(30);
+  return { a, b };
+}
+
+test("delete answers only the requester, then every synced client gets the removal", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1"), s("codex", "u2")];
+  const { a, b } = await syncedPair(h);
+  const aBefore = a.sent.length;
+  const bBefore = b.sent.length;
+  a.client.handle({ type: "delete", requestId: "r1", agent: "codex", id: "u1" });
+  await tick(30);
+  assert.deepEqual(h.codex.deleted, ["u1"]);
+  const aNew = a.sent.slice(aBefore);
+  const bNew = b.sent.slice(bBefore);
+  assert.deepEqual(aNew[0], { type: "deleteResult", requestId: "r1", ok: true });
+  assert.ok(!bNew.some((m) => m.type === "deleteResult"));
+  for (const msgs of [aNew, bNew]) {
+    const changed = msgs.filter((m) => m.type === "changed") as Array<{ upserted: SessionInfo[]; removed: string[] }>;
+    assert.equal(changed.length, 1);
+    assert.deepEqual(changed[0], { type: "changed", upserted: [], removed: ["codex:u1"] });
+  }
+  h.daemon.stop();
+});
+
+test("a failed delete answers ok:false with the error and does not refresh", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1")];
+  const { a, b } = await syncedPair(h);
+  h.codex.deleteError = new Error("the session is running");
+  const calls = h.codex.snapshotCalls;
+  const aBefore = a.sent.length;
+  const bBefore = b.sent.length;
+  a.client.handle({ type: "delete", requestId: "r2", agent: "codex", id: "u1" });
+  await tick(30);
+  assert.deepEqual(a.sent.slice(aBefore), [{ type: "deleteResult", requestId: "r2", ok: false, error: "the session is running" }]);
+  assert.equal(b.sent.length, bBefore);
+  assert.equal(h.codex.snapshotCalls, calls);
+  h.daemon.stop();
+});
+
+test("delete for an unknown agent or a provider without delete answers ok:false", async () => {
+  const plain: SessionProvider = { agent: "claude", snapshot: async () => [], watch: () => ({ dispose: () => {} }) };
+  const daemon = new Daemon({ providers: [plain], version: "t", home: "/h", debounceMs: 10, pollMs: 60_000 });
+  const sent: DaemonMessage[] = [];
+  const c = daemon.attach((m) => sent.push(m));
+  c.handle({ type: "delete", requestId: "1", agent: "opencode", id: "x" });
+  c.handle({ type: "delete", requestId: "2", agent: "claude", id: "x" });
+  await tick(10);
+  assert.deepEqual(sent, [
+    { type: "deleteResult", requestId: "1", ok: false, error: 'unknown agent "opencode"' },
+    { type: "deleteResult", requestId: "2", ok: false, error: "deleting claude sessions is not supported" },
+  ]);
+  daemon.stop();
+});
+
+test("a delete finishing after the requester detached sends it nothing", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1")];
+  const { a, b } = await syncedPair(h);
+  const gate = deferred();
+  const orig = h.codex.delete.bind(h.codex);
+  h.codex.delete = async (id: string) => { await gate.promise; return orig(id); };
+  const aBefore = a.sent.length;
+  a.client.handle({ type: "delete", requestId: "r3", agent: "codex", id: "u1" });
+  a.client.detach();
+  gate.resolve();
+  await tick(30);
+  assert.equal(a.sent.length, aBefore);
+  assert.ok(b.sent.some((m) => m.type === "changed"));
   h.daemon.stop();
 });

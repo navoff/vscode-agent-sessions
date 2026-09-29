@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import { sessionKey, type SessionInfo } from "@agent-sessions/core";
+import { sessionKey, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { LineClient, type LineClientOptions } from "./lineClient.js";
 
 export type MachineState = "disconnected" | "connecting" | "connected" | "error";
@@ -33,6 +33,15 @@ export function createStderrTail(max = 5): { push(chunk: string | Buffer): void;
   };
 }
 
+/**
+ * Whether `message` is the daemon's answer to a hello with another protocol
+ * version ("unsupported protocol 2, daemon speaks 1"): the daemon on the
+ * other side is older or newer than this extension.
+ */
+export function isProtocolMismatch(message: string | undefined): boolean {
+  return message !== undefined && /\bunsupported protocol \d+, daemon speaks \d+/.test(message);
+}
+
 export type ProcessFactory = () => DaemonProcess | Promise<DaemonProcess>;
 
 export interface MachineConnectionEvents {
@@ -43,6 +52,11 @@ export interface MachineConnectionEvents {
 
 export interface MachineConnectionOptions {
   autoReconnect: boolean;
+  /**
+   * Whether to keep reconnecting after a protocol mismatch. Default true.
+   * Off for a remote machine, where only "Prepare Machine" replaces the daemon.
+   */
+  retryOnProtocolMismatch?: boolean;
   backoffMs?: number[];
   clientOptions?: LineClientOptions;
 }
@@ -93,6 +107,12 @@ export class MachineConnection {
   /** Asks the connected daemon to exit; no-op without a live client. */
   requestShutdown(): void {
     this.client?.sendShutdown();
+  }
+
+  /** Deletes a session through the connected daemon; see LineClient.deleteSession. */
+  deleteSession(agent: AgentKind, id: string): Promise<void> {
+    if (!this.client || this.state !== "connected") return Promise.reject(new Error("the machine is not connected"));
+    return this.client.deleteSession(agent, id);
   }
 
   private open(): void {
@@ -155,7 +175,7 @@ export class MachineConnection {
     if (!this.wantConnected) return;
     this.teardown();
     this.setState("error", message);
-    if (!this.opts.autoReconnect) {
+    if (!this.opts.autoReconnect || (this.opts.retryOnProtocolMismatch === false && isProtocolMismatch(message))) {
       this.wantConnected = false;
       return;
     }

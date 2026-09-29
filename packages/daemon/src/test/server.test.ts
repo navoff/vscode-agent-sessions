@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionInfo, SessionProvider } from "@agent-sessions/core";
 import { Daemon } from "../daemon.js";
+import { PROTOCOL_VERSION } from "../protocol.js";
 import { ensurePrivateDir, isPrivateDir, removeStaleSocket, serveOnSocket, type SocketServer } from "../server.js";
 
 class FakeProvider implements SessionProvider {
@@ -45,7 +46,7 @@ test("two clients talk independently over the socket", async () => {
   const h = await setup();
   const a = await client(h.path);
   const b = await client(h.path);
-  a.send({ type: "hello", protocol: 1 });
+  a.send({ type: "hello", protocol: PROTOCOL_VERSION });
   assert.equal(JSON.parse(await a.next()).type, "hello");
   a.send({ type: "snapshot" });
   assert.equal(JSON.parse(await a.next()).type, "snapshot");

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
+import { PROTOCOL_VERSION } from "@agent-sessions/daemon";
 import { LineClient, type LineClientEvents } from "../connection/lineClient.js";
 
 function harness(opts = {}) {
@@ -21,13 +22,13 @@ function harness(opts = {}) {
   return { fromDaemon, toDaemon, sentToDaemon, calls, client };
 }
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const hello = '{"type":"hello","protocol":1,"daemonVersion":"1.2.3","agents":["claude"],"home":"/h"}\n';
+const hello = `{"type":"hello","protocol":${PROTOCOL_VERSION},"daemonVersion":"1.2.3","agents":["claude"],"home":"/h"}\n`;
 
 test("handshake: sends hello, requests snapshot after daemon hello", async () => {
   const h = harness();
   h.client.start();
   await tick(5);
-  assert.deepEqual(h.sentToDaemon, ['{"type":"hello","protocol":1}']);
+  assert.deepEqual(h.sentToDaemon, [`{"type":"hello","protocol":${PROTOCOL_VERSION}}`]);
   h.fromDaemon.write(hello);
   await tick(5);
   assert.deepEqual(h.calls, ["hello:1.2.3"]);
@@ -124,4 +125,56 @@ test("sendShutdown writes a shutdown message to the daemon", async () => {
   await tick(5);
   assert.deepEqual(h.sentToDaemon, ['{"type":"shutdown"}']);
   h.client.dispose();
+});
+
+function connected(opts = {}) {
+  const h = harness({ pingIntervalMs: 1000, pongTimeoutMs: 1000, ...opts });
+  h.client.start();
+  h.fromDaemon.write(hello);
+  return h;
+}
+const sentDeletes = (h: ReturnType<typeof harness>) => h.sentToDaemon.map((l) => JSON.parse(l)).filter((m) => m.type === "delete");
+
+test("deleteSession sends a delete request and resolves on ok", async () => {
+  const h = connected();
+  await tick(5);
+  const done = h.client.deleteSession("codex", "u1");
+  await tick(5);
+  const [req] = sentDeletes(h);
+  assert.deepEqual({ ...req, requestId: typeof req.requestId }, { type: "delete", requestId: "string", agent: "codex", id: "u1" });
+  // An unknown request id is ignored.
+  h.fromDaemon.write(JSON.stringify({ type: "deleteResult", requestId: "nope", ok: false, error: "x" }) + "\n");
+  h.fromDaemon.write(JSON.stringify({ type: "deleteResult", requestId: req.requestId, ok: true }) + "\n");
+  await done;
+  h.client.dispose();
+});
+
+test("deleteSession matches answers by request id and rejects with the daemon's error", async () => {
+  const h = connected();
+  await tick(5);
+  const first = h.client.deleteSession("codex", "u1");
+  const second = h.client.deleteSession("claude", "c1");
+  await tick(5);
+  const [r1, r2] = sentDeletes(h);
+  assert.notEqual(r1.requestId, r2.requestId);
+  h.fromDaemon.write(JSON.stringify({ type: "deleteResult", requestId: r2.requestId, ok: false, error: "the session is running" }) + "\n");
+  await assert.rejects(second, /the session is running/);
+  h.fromDaemon.write(JSON.stringify({ type: "deleteResult", requestId: r1.requestId, ok: true }) + "\n");
+  await first;
+  // ok:false without a message still rejects.
+  const third = h.client.deleteSession("codex", "u2");
+  await tick(5);
+  h.fromDaemon.write(JSON.stringify({ type: "deleteResult", requestId: sentDeletes(h)[2].requestId, ok: false }) + "\n");
+  await assert.rejects(third, /delete failed/);
+  h.client.dispose();
+});
+
+test("deleteSession rejects on timeout, on close and when already closed", async () => {
+  const h = connected({ requestTimeoutMs: 20 });
+  await tick(5);
+  await assert.rejects(h.client.deleteSession("codex", "u1"), /no answer from the daemon/);
+  const pending = h.client.deleteSession("codex", "u2");
+  h.fromDaemon.end();
+  await assert.rejects(pending, /connection closed/);
+  await assert.rejects(h.client.deleteSession("codex", "u3"), /not connected/);
 });
