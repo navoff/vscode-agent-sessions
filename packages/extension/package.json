@@ -3,8 +3,7 @@
   "displayName": "Agent Sessions",
   "description": "Claude Code and Codex sessions from local and remote machines in one view",
   "version": "0.1.3",
-  "publisher": "postnovvm",
-  "private": true,
+  "publisher": "navoff",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -20,6 +19,14 @@
   },
   "categories": [
     "Other"
+  ],
+  "icon": "resources/icon.png",
+  "keywords": [
+    "claude",
+    "codex",
+    "sessions",
+    "ai agent",
+    "ai chat"
   ],
   "main": "./dist/extension.cjs",
   "activationEvents": [

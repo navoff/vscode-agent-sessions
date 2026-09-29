@@ -9,6 +9,8 @@ it, does not tell Claude sessions from Codex ones, and opens Claude sessions
 in Copilot rather than in the Claude Code extension. Agent Sessions reads the
 agents' own session stores instead and stays out of their way.
 
+![The Agent Sessions view: sessions of two agents grouped by machine and project, with running and unread marks](https://raw.githubusercontent.com/navoff/vscode-agent-sessions/main/media/screenshot.png)
+
 ## Features
 
 - **One tree for every agent.** Sessions are grouped by machine and project.
