@@ -5,7 +5,17 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-export const SSH_BASE_ARGS = ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "ConnectTimeout=15"];
+// RemoteCommand=none and RequestTTY=no override ssh_config entries that force
+// an interactive shell (RemoteCommand zsh, RequestTTY yes); with them set, ssh
+// refuses to run our command ("Cannot execute command-line and remote command").
+export const SSH_BASE_ARGS = [
+  "-o", "BatchMode=yes",
+  "-o", "ServerAliveInterval=15",
+  "-o", "ServerAliveCountMax=3",
+  "-o", "ConnectTimeout=15",
+  "-o", "RemoteCommand=none",
+  "-o", "RequestTTY=no",
+];
 
 export function spawnSshDaemon(sshPath: string, sshHost: string, remoteNode: string, remoteDaemon: string, log: (line: string) => void): DaemonProcess {
   const child = spawn(sshPath, [...SSH_BASE_ARGS, "-T", "--", sshHost, `${shellQuote(remoteNode)} ${shellQuote(remoteDaemon)} --stdio`], {

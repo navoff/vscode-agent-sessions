@@ -89,3 +89,11 @@ test("parseMachinesFile drops records with an invalid sshHost", () => {
   const f = parseMachinesFile(JSON.stringify({ version: 1, machines: [{ id: "a", sshHost: "-oProxyCommand=x" }, { id: "b", sshHost: "b" }] }));
   assert.deepEqual(f.machines.map((m) => m.id), ["b"]);
 });
+
+test("ssh base args override interactive ssh_config settings", async () => {
+  const { SSH_BASE_ARGS } = await import("../connection/sshConnection.js");
+  const opts = SSH_BASE_ARGS.filter((a) => a !== "-o");
+  assert.ok(opts.includes("BatchMode=yes"));
+  assert.ok(opts.includes("RemoteCommand=none"));
+  assert.ok(opts.includes("RequestTTY=no"));
+});
