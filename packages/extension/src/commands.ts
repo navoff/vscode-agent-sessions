@@ -5,7 +5,7 @@ import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState
 import type { SessionNode, TreeNode } from "./tree/treeModel.js";
 import { selectionTargets } from "./tree/selection.js";
 import { DoubleClickDetector } from "./tree/clickDetector.js";
-import { claudeFindsSession, isDirectory, PENDING_OPEN_KEY, type PendingOpen } from "./claudeFolder.js";
+import { claudeFindsSession, isDirectory, remoteFolderUri } from "./claudeFolder.js";
 
 export type { FilterState };
 
@@ -18,8 +18,10 @@ export interface CommandDeps {
   deleteSession(machineId: string, agent: AgentKind, id: string): Promise<void>;
   /** Current tree selection, for commands run from a keybinding. */
   selection(): readonly TreeNode[];
-  /** Shared by all windows; hands a session over to a window opened on its folder. */
-  globalState: vscode.Memento;
+  /** Records a session on its machine for a window on its folder to open. */
+  pendingOpen(machineId: string, session: SessionInfo): Promise<void>;
+  /** The ssh host of a remote machine, undefined for the local one. */
+  sshHost(machineId: string): string | undefined;
   log: vscode.OutputChannel;
 }
 
@@ -82,19 +84,42 @@ async function offerClaudeFolder(deps: CommandDeps, session: SessionInfo): Promi
   const terminal = "Resume in Terminal";
   const pick = await vscode.window.showInformationMessage(`"${session.title}" belongs to ${session.cwd}. ${why}`, newWindow, terminal);
   if (pick === newWindow) {
-    const pending: PendingOpen = { session, at: Date.now() };
-    await deps.globalState.update(PENDING_OPEN_KEY, pending);
+    try {
+      await deps.pendingOpen("local", session);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Cannot hand the session over: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
     await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(session.cwd), { forceNewWindow: true });
   } else if (pick === terminal) {
     resumeInTerminal(session);
   }
 }
 
-export async function openSession(deps: CommandDeps, machineId: string, session: SessionInfo): Promise<void> {
-  if (machineId !== "local") {
-    void vscode.window.showInformationMessage("Opening remote sessions will come in a later version.");
+/**
+ * A remote session opens in a Remote-SSH window on its folder: the machine's
+ * daemon records it, and the extension in that window picks it up on activation.
+ */
+async function openRemoteSession(deps: CommandDeps, machineId: string, session: SessionInfo): Promise<void> {
+  const host = deps.sshHost(machineId);
+  if (!host) return;
+  if (!session.cwd) {
+    void vscode.window.showWarningMessage(`"${session.title}" has no folder to open a remote window on.`);
     return;
   }
+  try {
+    await deps.pendingOpen(machineId, session);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Cannot open "${session.title}" on ${host}: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.parse(remoteFolderUri(host, session.cwd)), { forceNewWindow: true });
+  deps.store.markRead(machineId, session, Date.now());
+  deps.refresh();
+}
+
+export async function openSession(deps: CommandDeps, machineId: string, session: SessionInfo): Promise<void> {
+  if (machineId !== "local") return openRemoteSession(deps, machineId, session);
   if (!checkSessionId(session.id)) return;
   if (session.agent === "claude") {
     if (!vscode.extensions.getExtension(CLAUDE_EXTENSION)) return offerInstall(CLAUDE_EXTENSION, "Claude Code");

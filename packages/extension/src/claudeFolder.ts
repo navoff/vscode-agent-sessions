@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
 import type { SessionInfo } from "@agent-sessions/core";
+import type { PendingOpen } from "@agent-sessions/daemon";
 
 /**
  * The Claude Code extension looks a session up only in the project folders
@@ -40,13 +41,6 @@ export async function isDirectory(path: string): Promise<boolean> {
   return (await stat(path).catch(() => undefined))?.isDirectory() ?? false;
 }
 
-/** A session to open once a window on its folder activates. */
-export interface PendingOpen {
-  session: SessionInfo;
-  at: number;
-}
-
-export const PENDING_OPEN_KEY = "agentSessions.pendingClaudeOpen";
 /** A new window that takes longer than this to activate does not pick the session up. */
 export const PENDING_OPEN_TTL_MS = 2 * 60_000;
 
@@ -57,4 +51,10 @@ export async function pendingSessionFor(pending: PendingOpen | undefined, folder
   const target = await canonical(pending.session.cwd);
   for (const f of folders) if ((await canonical(f)) === target) return pending.session;
   return undefined;
+}
+
+/** The folder `cwd` on the ssh host `sshHost`, as Remote-SSH addresses it. */
+export function remoteFolderUri(sshHost: string, cwd: string): string {
+  const path = cwd.split("/").map(encodeURIComponent).join("/");
+  return `vscode-remote://ssh-remote+${sshHost}${path}`;
 }

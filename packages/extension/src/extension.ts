@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentKind } from "@agent-sessions/core";
-import { PROTOCOL_VERSION } from "@agent-sessions/daemon";
+import { clearPendingOpen, PROTOCOL_VERSION, readPendingOpen } from "@agent-sessions/daemon";
 import { daemonVersionAction, protocolMismatchAction } from "./connection/daemonUpgrade.js";
 import { isProtocolMismatch, MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
 import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnection.js";
@@ -12,7 +12,7 @@ import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, sto
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { openSession, registerSessionCommands, type CommandDeps, type FilterState } from "./commands.js";
-import { PENDING_OPEN_KEY, pendingSessionFor, type PendingOpen } from "./claudeFolder.js";
+import { pendingSessionFor } from "./claudeFolder.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
@@ -388,20 +388,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       updateFilterContext();
       void context.workspaceState.update(FILTER_KEY, f);
     },
-    globalState: context.globalState,
+    pendingOpen: (machineId, session) => {
+      const c = connections.get(machineId);
+      return c ? c.pendingOpen(session) : Promise.reject(new Error("the machine is not connected"));
+    },
+    sshHost: (machineId) => machines.machines.find((m) => m.id === machineId)?.sshHost,
   };
   registerSessionCommands(context, sessionDeps);
 
-  // A session that another window could not open in Claude Code and handed
-  // over to a window on its folder: this one, when it has just been opened
-  // or, if it already existed, focused.
+  // A session that another window handed over to a window on its folder,
+  // through the pending-open file of this machine (see daemon/pendingOpen.ts):
+  // this window, when it has just been opened or, if it already existed, focused.
   const openPendingSession = async () => {
-    const pending = context.globalState.get<PendingOpen>(PENDING_OPEN_KEY);
+    const pending = await readPendingOpen(homedir());
     if (!pending) return;
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
     const session = await pendingSessionFor(pending, folders, Date.now());
     if (!session) return;
-    await context.globalState.update(PENDING_OPEN_KEY, undefined);
+    await clearPendingOpen(homedir());
     await openSession(sessionDeps, LOCAL_ID, session);
   };
   context.subscriptions.push(vscode.window.onDidChangeWindowState((s) => { if (s.focused) void openPendingSession(); }));

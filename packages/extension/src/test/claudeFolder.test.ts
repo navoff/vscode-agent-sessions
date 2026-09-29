@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionInfo } from "@agent-sessions/core";
-import { claudeFindsSession, isDirectory, PENDING_OPEN_TTL_MS, pendingSessionFor } from "../claudeFolder.js";
+import { claudeFindsSession, isDirectory, PENDING_OPEN_TTL_MS, pendingSessionFor, remoteFolderUri } from "../claudeFolder.js";
 
 const noWorktrees = async () => [];
 const session = (cwd: string): SessionInfo => ({ agent: "claude", id: "a", title: "a", cwd, createdAt: 1, updatedAt: 1, status: "idle" });
@@ -45,4 +45,9 @@ test("a pending session opens only in a window on its folder and only while fres
   assert.equal(await pendingSessionFor({ session: s, at: 1000 }, ["/w"], 1000 + PENDING_OPEN_TTL_MS + 1), undefined);
   assert.equal(await pendingSessionFor({ session: s, at: 1000 }, ["/w"], 500), undefined);
   assert.equal(await pendingSessionFor(undefined, ["/w"], 2000), undefined);
+});
+
+test("remoteFolderUri addresses the ssh host and keeps the path readable", () => {
+  assert.equal(remoteFolderUri("dev-box", "/home/me/proj"), "vscode-remote://ssh-remote+dev-box/home/me/proj");
+  assert.equal(remoteFolderUri("dev-box", "/home/me/my proj"), "vscode-remote://ssh-remote+dev-box/home/me/my%20proj");
 });
