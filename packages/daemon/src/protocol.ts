@@ -55,7 +55,7 @@ export function parseClientMessage(line: string): ClientMessage | undefined {
 
 const STATUSES = new Set<unknown>(["running", "idle", "unknown"]);
 
-function isSessionInfo(v: unknown): v is SessionInfo {
+export function isSessionInfo(v: unknown): v is SessionInfo {
   if (typeof v !== "object" || v === null) return false;
   const s = v as Record<string, unknown>;
   return (
