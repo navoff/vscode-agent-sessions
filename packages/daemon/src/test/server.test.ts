@@ -30,13 +30,14 @@ async function client(path: string): Promise<{ socket: Socket; lines: string[]; 
 }
 const closed = (s: Socket) => new Promise<void>((r) => (s.closed ? r() : s.once("close", () => r())));
 
-async function setup(idleTimeoutMs = 60_000) {
+async function setup(idleTimeoutMs = 60_000, graceMs?: number) {
   const dir = await mkdtemp(join(tmpdir(), "as-sock-"));
   const path = join(dir, "d.sock");
+  const provider = new FakeProvider();
   let server!: SocketServer;
-  const daemon = new Daemon({ providers: [new FakeProvider()], version: "t", home: "/h", debounceMs: 10, onStop: () => server.finish() });
-  server = await serveOnSocket(daemon, path, { idleTimeoutMs, log: () => {} });
-  return { dir, path, daemon, server };
+  const daemon = new Daemon({ providers: [provider], version: "t", home: "/h", debounceMs: 10, onStop: () => server.finish() });
+  server = await serveOnSocket(daemon, path, { idleTimeoutMs, graceMs, log: () => {} });
+  return { dir, path, daemon, server, provider };
 }
 
 test("two clients talk independently over the socket", async () => {
@@ -123,4 +124,69 @@ test("removeStaleSocket deletes a dead socket file and keeps a live one", async 
   await stat(h.path);
   h.daemon.stop();
   await h.server.close();
+});
+
+test("a client reset mid-write does not crash the server", async () => {
+  let crash: unknown;
+  const guard = (err: unknown) => { crash = err; };
+  process.once("uncaughtException", guard);
+  try {
+    const h = await setup();
+    const title = "x".repeat(300);
+    h.provider.sessions = Array.from({ length: 20_000 }, (_, i) => ({ agent: "claude" as const, id: `s${i}`, title, cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle" as const }));
+    const socket = connect(h.path);
+    await new Promise<void>((res, rej) => { socket.once("connect", res); socket.once("error", rej); });
+    socket.on("error", () => {});
+    socket.pause();
+    socket.write(JSON.stringify({ type: "snapshot" }) + "\n");
+    await new Promise((r) => setTimeout(r, 50));
+    socket.destroy();
+    await new Promise((r) => setTimeout(r, 100));
+    const b = await client(h.path);
+    b.send({ type: "ping" });
+    assert.equal(JSON.parse(await b.next()).type, "pong");
+    b.socket.destroy();
+    h.daemon.stop();
+    await h.server.close();
+    assert.equal(crash, undefined);
+  } finally {
+    process.off("uncaughtException", guard);
+  }
+});
+
+test("finish removes the socket file immediately", async () => {
+  const h = await setup(60_000, 50);
+  // Half-open and paused: this client never finishes its side of the close.
+  const socket = connect({ path: h.path, allowHalfOpen: true });
+  await new Promise<void>((res, rej) => { socket.once("connect", res); socket.once("error", rej); });
+  socket.on("error", () => {});
+  socket.pause();
+  h.daemon.stop();
+  await new Promise((r) => setImmediate(r));
+  await assert.rejects(stat(h.path));
+  await h.server.close();
+  socket.destroy();
+});
+
+test("finish destroys clients that do not close within the grace period", async () => {
+  const h = await setup(60_000, 50);
+  const socket = connect({ path: h.path, allowHalfOpen: true });
+  await new Promise<void>((res, rej) => { socket.once("connect", res); socket.once("error", rej); });
+  socket.on("error", () => {});
+  socket.resume();
+  const t0 = Date.now();
+  h.daemon.stop();
+  await h.server.close();
+  const took = Date.now() - t0;
+  assert.ok(took < 150, `close took ${took}ms`);
+  socket.destroy();
+});
+
+test("serveOnSocket rejects a socket path that is too long", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "as-long-"));
+  const path = join(dir, "x".repeat(Math.max(1, 120 - dir.length - 1)));
+  assert.ok(Buffer.byteLength(path) >= 120);
+  const daemon = new Daemon({ providers: [new FakeProvider()], version: "t", home: "/h" });
+  await assert.rejects(serveOnSocket(daemon, path, { idleTimeoutMs: 60_000, log: () => {} }), /too long/);
+  daemon.stop();
 });

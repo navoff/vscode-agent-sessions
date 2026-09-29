@@ -6,14 +6,21 @@ import { parseClientMessage } from "./protocol.js";
 
 export interface SocketServerOptions {
   idleTimeoutMs: number;
+  /** How long finish() waits for clients to close before destroying them. Default 2000. */
+  graceMs?: number;
   log: (msg: string) => void;
 }
+
+const DEFAULT_GRACE_MS = 2000;
+// sun_path holds 108 bytes on Linux and 104 on macOS, including the NUL.
+// Longer paths are silently truncated by the kernel, so refuse them.
+const MAX_SOCKET_PATH_BYTES = 103;
 
 export interface SocketServer {
   readonly address: string;
   /** Call from the daemon's onStop: ends every socket and closes the server. */
   finish(): void;
-  /** Resolves once finish() has closed the server and removed the socket file. */
+  /** Resolves once finish() has removed the socket file and every connection is closed. */
   close(): Promise<void>;
 }
 
@@ -36,8 +43,13 @@ export async function removeStaleSocket(path: string): Promise<void> {
 }
 
 export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketServerOptions): Promise<SocketServer> {
+  if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH_BYTES) {
+    return Promise.reject(new Error(`socket path too long (${Buffer.byteLength(socketPath)} bytes, max ${MAX_SOCKET_PATH_BYTES}): ${socketPath}`));
+  }
+  const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
   const sockets = new Set<Socket>();
   let idleTimer: NodeJS.Timeout | undefined;
+  let graceTimer: NodeJS.Timeout | undefined;
   let finished = false;
   let closedResolve!: () => void;
   const closed = new Promise<void>((r) => (closedResolve = r));
@@ -65,6 +77,8 @@ export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketSe
       if (!socket.destroyed) socket.write(JSON.stringify(m) + "\n");
     });
     const rl = createInterface({ input: socket });
+    // readline re-emits socket errors; the socket's own handler logs them.
+    rl.on("error", () => {});
     rl.on("line", (line) => {
       if (!line.trim()) return;
       const msg = parseClientMessage(line);
@@ -73,7 +87,11 @@ export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketSe
         return;
       }
       client.handle(msg);
-      if (client.detached) socket.end();
+      if (client.detached) {
+        socket.end();
+        // Lines after the one that detached us must not be parsed.
+        rl.close();
+      }
     });
     socket.on("close", () => {
       sockets.delete(socket);
@@ -88,10 +106,16 @@ export function serveOnSocket(daemon: Daemon, socketPath: string, opts: SocketSe
     finished = true;
     if (idleTimer) clearTimeout(idleTimer);
     for (const s of sockets) s.end();
-    server.close(() => {
-      void unlink(socketPath)
-        .catch(() => {})
-        .then(() => closedResolve());
+    const serverClosed = new Promise<void>((r) => server.close(() => r()));
+    // Remove the file now, not after every client is gone: the listening fd is
+    // already closed, so a successor daemon may bind this path meanwhile.
+    const unlinked = unlink(socketPath).catch(() => {});
+    graceTimer = setTimeout(() => {
+      for (const s of sockets) s.destroy();
+    }, graceMs);
+    void Promise.all([serverClosed, unlinked]).then(() => {
+      clearTimeout(graceTimer);
+      closedResolve();
     });
   };
 
