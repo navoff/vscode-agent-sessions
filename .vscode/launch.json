@@ -5,7 +5,27 @@
       "name": "Run Extension",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/extension"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension"
+      ],
+      "preLaunchTask": "npm: build"
+    },
+    {
+      "name": "Run Extension (demo data)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
+        "--disable-extensions",
+        "--user-data-dir=${workspaceFolder}/.demo/user-data",
+        "${workspaceFolder}"
+      ],
+      "env": {
+        "CLAUDE_CONFIG_DIR": "${workspaceFolder}/.demo/claude",
+        "CODEX_HOME": "${workspaceFolder}/.demo/codex",
+        "XDG_RUNTIME_DIR": "${workspaceFolder}/.demo/runtime",
+        "AGENT_SESSIONS_DEMO": "1"
+      },
       "preLaunchTask": "npm: build"
     }
   ]

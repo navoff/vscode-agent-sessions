@@ -2,10 +2,14 @@
   "name": "agent-sessions-monorepo",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "demo": "node scripts/demo-data.mjs",
+    "demo:touch": "node scripts/demo-data.mjs --touch"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
