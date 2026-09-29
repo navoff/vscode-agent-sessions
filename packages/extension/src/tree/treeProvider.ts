@@ -40,7 +40,6 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (node.kind === "project") {
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
       item.iconPath = new vscode.ThemeIcon("folder");
-      item.description = String(node.sessions.length);
       item.tooltip = node.cwd;
       item.contextValue = "project";
       return item;

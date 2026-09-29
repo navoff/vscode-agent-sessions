@@ -1,22 +1,26 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 
-const agents = { claude: ["#D97757", "C"], codex: ["#10A37F", "X"], opencode: ["#7C3AED", "O"] };
+const agents = {
+  claude: ["#8A3A12", "A", "#FF9A4D"],
+  codex: ["#3A3A3A", "C", "#FFFFFF"],
+  opencode: ["#7C3AED", "O", "#FFFFFF"],
+};
 mkdirSync("resources", { recursive: true });
 
-function icon(color, letter, variant) {
+function icon(color, letter, fg, variant) {
   const opacity = variant === "hidden" ? "0.4" : "1";
   const dot = variant === "running" ? `<circle cx="13" cy="3" r="3" fill="#3FB950" stroke="#0d1117" stroke-width="0.8"/>` : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
 <g opacity="${opacity}"><rect x="1" y="1" width="14" height="14" rx="3" fill="${color}"/>
-<text x="8" y="11.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#fff">${letter}</text></g>${dot}
+<text x="8" y="11.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="${fg}">${letter}</text></g>${dot}
 </svg>
 `;
 }
 
-for (const [agent, [color, letter]] of Object.entries(agents)) {
-  writeFileSync(`resources/${agent}.svg`, icon(color, letter, "plain"));
-  writeFileSync(`resources/${agent}-running.svg`, icon(color, letter, "running"));
-  writeFileSync(`resources/${agent}-hidden.svg`, icon(color, letter, "hidden"));
+for (const [agent, [color, letter, fg]] of Object.entries(agents)) {
+  writeFileSync(`resources/${agent}.svg`, icon(color, letter, fg, "plain"));
+  writeFileSync(`resources/${agent}-running.svg`, icon(color, letter, fg, "running"));
+  writeFileSync(`resources/${agent}-hidden.svg`, icon(color, letter, fg, "hidden"));
 }
 
 writeFileSync(
