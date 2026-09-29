@@ -42,8 +42,11 @@ export function connectSocket(path: string, timeoutMs: number): Promise<Socket> 
   });
 }
 
-/** Creates the lock file exclusively. A lock older than `staleMs` is taken over. */
-export async function acquireLock(lockPath: string, staleMs: number, now: number): Promise<boolean> {
+/**
+ * Creates the lock file exclusively. A lock older than `staleMs` is taken over.
+ * Retries only when the lock vanished under us, at most `attempts` times.
+ */
+export async function acquireLock(lockPath: string, staleMs: number, now: number, attempts = 3): Promise<boolean> {
   try {
     const fh = await open(lockPath, "wx");
     try {
@@ -57,15 +60,14 @@ export async function acquireLock(lockPath: string, staleMs: number, now: number
   }
   try {
     const st = await stat(lockPath);
-    if (now - st.mtimeMs > staleMs) {
-      await unlink(lockPath);
-      return acquireLock(lockPath, staleMs, now);
-    }
-  } catch {
-    // the lock vanished or was taken over between the calls; try again
-    return acquireLock(lockPath, staleMs, now);
+    if (now - st.mtimeMs <= staleMs) return false;
+    await unlink(lockPath);
+  } catch (err) {
+    // ENOENT: another window removed the lock between the calls; anything
+    // else (such as EACCES) will not go away by retrying.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") return false;
   }
-  return false;
+  return attempts > 1 ? acquireLock(lockPath, staleMs, now, attempts - 1) : false;
 }
 
 export async function releaseLock(lockPath: string): Promise<void> {
@@ -76,12 +78,24 @@ export async function releaseLock(lockPath: string): Promise<void> {
   }
 }
 
+/**
+ * Whether a failed connect means the socket file is missing or nobody listens
+ * on it, so it may be replaced. A timeout or a permission error may hide a
+ * live daemon and must not delete its socket.
+ */
+export function shouldReplaceSocket(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return code === "ENOENT" || code === "ECONNREFUSED";
+}
+
 export interface EnsureOptions {
   paths: SharedDaemonPaths;
   spawnDaemon: () => void;
   connectTimeoutMs?: number;
   retryMs?: number;
   log: (msg: string) => void;
+  /** Replaces `connectSocket`; for tests. */
+  connect?: (path: string, timeoutMs: number) => Promise<Socket>;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -90,22 +104,38 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function ensureSharedDaemon(opts: EnsureOptions): Promise<Socket> {
   const timeoutMs = opts.connectTimeoutMs ?? 5000;
   const retryMs = opts.retryMs ?? 100;
+  const connectTo = opts.connect ?? connectSocket;
+  const { socket, lock } = opts.paths;
   try {
-    return await connectSocket(opts.paths.socket, 1000);
+    return await connectTo(socket, 1000);
   } catch {
     // nothing listening yet
   }
-  await mkdir(dirname(opts.paths.lock), { recursive: true });
-  const locked = await acquireLock(opts.paths.lock, 30_000, Date.now());
+  await mkdir(dirname(lock), { recursive: true });
+  let held = await acquireLock(lock, 30_000, Date.now());
   try {
-    if (locked) {
+    if (held) {
+      // Another window may have started the daemon between our first connect
+      // and taking the lock; check again before replacing anything.
+      let lastErr: unknown;
       try {
-        await unlink(opts.paths.socket);
-      } catch {
-        // no stale socket file
+        return await connectTo(socket, 1000);
+      } catch (err) {
+        lastErr = err;
       }
-      opts.log("starting shared daemon");
-      opts.spawnDaemon();
+      if (shouldReplaceSocket(lastErr)) {
+        try {
+          await unlink(socket);
+        } catch {
+          // no stale socket file
+        }
+        opts.log("starting shared daemon");
+        opts.spawnDaemon();
+      } else {
+        opts.log(`daemon socket did not answer (${String(lastErr)}), waiting without spawning`);
+        held = false;
+        await releaseLock(lock);
+      }
     } else {
       opts.log("another window is starting the daemon, waiting");
     }
@@ -113,15 +143,15 @@ export async function ensureSharedDaemon(opts: EnsureOptions): Promise<Socket> {
     while (Date.now() < deadline) {
       await sleep(retryMs);
       try {
-        return await connectSocket(opts.paths.socket, 1000);
+        return await connectTo(socket, 1000);
       } catch {
         // keep waiting
       }
     }
   } finally {
-    if (locked) await releaseLock(opts.paths.lock);
+    if (held) await releaseLock(lock);
   }
-  throw new Error(`shared daemon did not come up at ${opts.paths.socket} within ${timeoutMs} ms`);
+  throw new Error(`shared daemon did not come up at ${socket} within ${timeoutMs} ms`);
 }
 
 /** Starts the daemon detached from this process, appending its output to `logPath`. */
