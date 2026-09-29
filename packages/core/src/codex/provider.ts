@@ -111,7 +111,8 @@ export class CodexProvider implements SessionProvider {
       }
       const info = entry.info;
       if (!info || !info.meta.isUserThread) continue;
-      const updatedAt = Math.trunc(st.mtimeMs);
+      // Opening a thread in Codex appends bookkeeping events, so mtime is only a fallback.
+      const updatedAt = info.activityAt ?? Math.trunc(st.mtimeMs);
       const existing = result.get(info.meta.id);
       if (existing && existing.updatedAt >= updatedAt) continue;
       result.set(info.meta.id, {

@@ -102,3 +102,51 @@ test("readRolloutInfo sees task_complete that follows a long turn", async () => 
   const info = await readRolloutInfo(file, (await stat(file)).size);
   assert.equal(info?.status, "idle");
 });
+
+const stamped = (type: string, timestamp: string, payload: Record<string, unknown> = {}) =>
+  JSON.stringify({ timestamp, type: "event_msg", payload: { type, ...payload } });
+const stampedUser = (text: string, timestamp: string) =>
+  JSON.stringify({ timestamp, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
+
+test("readRolloutInfo takes activity time from messages and task events, not bookkeeping", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "codex-"));
+  const file = join(dir, "rollout-act.jsonl");
+  const lines = [
+    meta({ id: "u1", timestamp: "2026-09-08T14:00:00.000Z", cwd: "/w", thread_source: "user" }),
+    stampedUser("вопрос", "2026-09-08T14:59:31.546Z"),
+    stamped("task_started", "2026-09-08T14:59:31.600Z"),
+    stamped("task_complete", "2026-09-08T14:59:40.000Z"),
+    stamped("thread_settings_applied", "2026-09-29T10:37:44.229Z"),
+    stamped("token_count", "2026-09-29T10:37:45.000Z"),
+  ];
+  await writeFile(file, lines.join("\n") + "\n");
+  const info = await readRolloutInfo(file, (await stat(file)).size);
+  assert.equal(info?.status, "idle");
+  assert.equal(info?.activityAt, Date.parse("2026-09-08T14:59:40.000Z"));
+});
+
+test("readRolloutInfo finds the activity time beyond 64 KB of bookkeeping", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "codex-"));
+  const file = join(dir, "rollout-far.jsonl");
+  const filler = Array.from({ length: 300 }, () => stamped("token_count", "2026-09-29T10:00:00.000Z", { pad: "x".repeat(400) }));
+  const lines = [
+    meta({ id: "u2", thread_source: "user", cwd: "/w" }),
+    stampedUser("вопрос", "2026-09-08T14:59:31.546Z"),
+    stamped("task_started", "2026-09-08T14:59:32.000Z"),
+    ...filler,
+  ];
+  await writeFile(file, lines.join("\n") + "\n");
+  const size = (await stat(file)).size;
+  assert.ok(size > 64 * 1024);
+  const info = await readRolloutInfo(file, size);
+  assert.equal(info?.status, "running");
+  assert.equal(info?.activityAt, Date.parse("2026-09-08T14:59:32.000Z"));
+});
+
+test("readRolloutInfo leaves activityAt undefined without timestamps", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "codex-"));
+  const file = join(dir, "rollout-nots.jsonl");
+  await writeFile(file, [meta({ id: "u3", thread_source: "user", cwd: "/w" }), userMsg("x"), event("task_complete")].join("\n") + "\n");
+  const info = await readRolloutInfo(file, (await stat(file)).size);
+  assert.equal(info?.activityAt, undefined);
+});

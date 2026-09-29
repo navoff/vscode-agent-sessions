@@ -12,6 +12,8 @@ export interface CodexRolloutInfo {
   meta: CodexRolloutMeta;
   title?: string;
   status: SessionStatus;
+  /** Timestamp of the last message or task event; undefined when none was found in the tail. */
+  activityAt?: number;
 }
 
 const HEAD_BYTES = 2 * 1024 * 1024;
@@ -80,15 +82,50 @@ export function extractFirstPrompt(lines: Iterable<string>): string | undefined 
 }
 
 const STATUS_EVENT = /"type":"(task_started|task_complete|turn_aborted)"/;
+const MESSAGE_ROLE = /"role":"(user|assistant)"/;
+const TIMESTAMP = /"timestamp":"([^"]+)"/;
+
+/**
+ * Activity records are user/assistant messages and task events. Codex also
+ * appends bookkeeping events (thread_settings_applied, token_count) when a
+ * thread is merely opened; those must not count as activity.
+ */
+function isActivityLine(line: string): boolean {
+  if (line.includes('"event_msg"')) return STATUS_EVENT.test(line);
+  return line.includes('"response_item"') && line.includes('"type":"message"') && MESSAGE_ROLE.test(line);
+}
+
+function timestampOf(line: string): number | undefined {
+  const m = TIMESTAMP.exec(line);
+  if (!m) return undefined;
+  const ts = Date.parse(m[1]);
+  return Number.isFinite(ts) ? ts : undefined;
+}
+
+interface TailScan {
+  status?: string;
+  activityAt?: number;
+}
+
+/** Last task event and last activity timestamp within one block of complete lines. */
+function scanTail(text: string): TailScan {
+  const out: TailScan = {};
+  for (const line of text.split("\n")) {
+    if (line.includes('"event_msg"')) {
+      const m = STATUS_EVENT.exec(line);
+      if (m) {
+        out.status = m[1];
+        out.activityAt = timestampOf(line) ?? out.activityAt;
+      }
+      continue;
+    }
+    if (isActivityLine(line)) out.activityAt = timestampOf(line) ?? out.activityAt;
+  }
+  return out;
+}
 
 function lastStatusEvent(text: string): string | undefined {
-  let last: string | undefined;
-  for (const line of text.split("\n")) {
-    if (!line.includes('"event_msg"')) continue;
-    const m = STATUS_EVENT.exec(line);
-    if (m) last = m[1];
-  }
-  return last;
+  return scanTail(text).status;
 }
 
 export function statusFromTail(tail: string): SessionStatus {
@@ -98,11 +135,13 @@ export function statusFromTail(tail: string): SessionStatus {
 // Reads the file backwards in 64 KB chunks until a chunk holds a task event.
 // The partial first line of each chunk is carried over to the next (earlier)
 // chunk. The scan stops after TAIL_MAX_BYTES to bound the cost on huge files.
-export async function readStatusBackwards(fh: FileHandle, size: number): Promise<SessionStatus> {
+export async function readTailBackwards(fh: FileHandle, size: number): Promise<{ status: SessionStatus; activityAt?: number }> {
   const limit = Math.max(0, size - TAIL_MAX_BYTES);
   let end = size;
   let carry = Buffer.alloc(0);
-  while (end > limit) {
+  let status: string | undefined;
+  let activityAt: number | undefined;
+  while (end > limit && (status === undefined || activityAt === undefined)) {
     const start = Math.max(limit, end - TAIL_CHUNK_BYTES);
     const chunk = Buffer.alloc(end - start);
     await fh.read(chunk, 0, chunk.length, start);
@@ -121,10 +160,16 @@ export async function readStatusBackwards(fh: FileHandle, size: number): Promise
       carry = buf.subarray(0, nl);
       complete = buf.subarray(nl + 1);
     }
-    const last = lastStatusEvent(complete.toString("utf8"));
-    if (last) return last === "task_started" ? "running" : "idle";
+    const scan = scanTail(complete.toString("utf8"));
+    // Chunks are visited from the end, so the first hit is the latest one.
+    if (status === undefined && scan.status !== undefined) status = scan.status;
+    if (activityAt === undefined && scan.activityAt !== undefined) activityAt = scan.activityAt;
   }
-  return "idle";
+  return { status: status === "task_started" ? "running" : "idle", activityAt };
+}
+
+export async function readStatusBackwards(fh: FileHandle, size: number): Promise<SessionStatus> {
+  return (await readTailBackwards(fh, size)).status;
 }
 
 export async function readRolloutInfo(filePath: string, size: number): Promise<CodexRolloutInfo | undefined> {
@@ -141,7 +186,8 @@ export async function readRolloutInfo(filePath: string, size: number): Promise<C
     const headLines = headText.split("\n");
     if (headLen < size) headLines.pop();
     const title = extractFirstPrompt(headLines);
-    return { meta, title, status: await readStatusBackwards(fh, size) };
+    const tail = await readTailBackwards(fh, size);
+    return { meta, title, status: tail.status, activityAt: tail.activityAt };
   } finally {
     await fh.close();
   }

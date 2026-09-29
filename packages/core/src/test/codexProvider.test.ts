@@ -212,3 +212,22 @@ test("delete refuses a thread whose writer lock is held and names the process", 
   await p.delete(CID);
   assert.equal(r.calls.length, 1);
 });
+
+test("snapshot uses the last activity time instead of the file mtime", async () => {
+  const dir = await makeCodexDir();
+  const day = join(dir, "sessions", "2026", "09", "28");
+  const stampedEvent = (type: string, timestamp: string) => JSON.stringify({ timestamp, type: "event_msg", payload: { type } });
+  await writeFile(
+    join(day, "rollout-2026-09-08T16-59-19-old1.jsonl"),
+    [
+      meta({ id: "old1", timestamp: "2026-09-08T14:00:00.000Z", cwd: "/w", thread_source: "user" }),
+      userMsg("старый вопрос"),
+      stampedEvent("task_started", "2026-09-08T14:59:31.600Z"),
+      stampedEvent("task_complete", "2026-09-08T14:59:40.000Z"),
+      stampedEvent("thread_settings_applied", "2026-09-29T10:37:44.229Z"),
+    ].join("\n") + "\n",
+  );
+  const p = new CodexProvider({ codexDir: dir });
+  const old = (await p.snapshot()).find((s) => s.id === "old1");
+  assert.equal(old?.updatedAt, Date.parse("2026-09-08T14:59:40.000Z"));
+});
