@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 - 2026-09-29
+
+- Folder context menu: mark the sessions of a folder read or unread, delete
+  them, or hide the folder as a whole, independently of hiding its sessions.
+
 ## 0.1.2 - 2026-09-29
 
 - Opening a session whose agent extension is missing installs it on request

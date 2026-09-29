@@ -67,6 +67,7 @@ agents' own session stores instead and stays out of their way.
 | Resume in a terminal | "Resume in Terminal" opens a terminal in the session folder with `claude --resume <id>` or `codex resume <id>` typed in, not run. |
 | Mark read / unread | Context menu. Opening a session marks it read. |
 | Hide / unhide | "Hide Session" removes a session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. |
+| Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; hide, delete and mark-as-read then apply to the whole selection. |
 | Copy the id | "Copy Session ID". |
