@@ -29,13 +29,15 @@ test("titleFromUserText skips system blocks and trims to first line", () => {
   assert.equal(titleFromUserText("<environment_context>\n..."), undefined);
   assert.equal(titleFromUserText("# AGENTS.md instructions"), undefined);
   assert.equal(titleFromUserText("   \n"), undefined);
-  assert.equal(titleFromUserText("почему PR требует ship\nвторая строка"), "почему PR требует ship");
+  assert.equal(titleFromUserText("why does the PR need ship\nsecond line"), "why does the PR need ship");
+  // Non-ASCII titles must survive untouched.
+  assert.equal(titleFromUserText("почему PR требует ship"), "почему PR требует ship");
   assert.equal(titleFromUserText("x".repeat(100))?.length, 80);
 });
 
 test("extractFirstPrompt returns the first real user text", () => {
-  const lines = [meta({ id: "u1" }), userMsg("<recommended_plugins>\n"), userMsg("# AGENTS.md instructions"), userMsg("сделай отчёт"), userMsg("второе")];
-  assert.equal(extractFirstPrompt(lines), "сделай отчёт");
+  const lines = [meta({ id: "u1" }), userMsg("<recommended_plugins>\n"), userMsg("# AGENTS.md instructions"), userMsg("write the report"), userMsg("second")];
+  assert.equal(extractFirstPrompt(lines), "write the report");
   assert.equal(extractFirstPrompt([meta({ id: "u1" })]), undefined);
 });
 
@@ -59,13 +61,13 @@ test("readRolloutInfo reads meta, title and status from a file", async () => {
   const lines = [
     meta({ id: "u1", timestamp: "2026-09-28T09:01:41.268Z", cwd: "/w", source: "vscode", thread_source: "user" }),
     userMsg("<environment_context>"),
-    userMsg("задача дня"),
+    userMsg("task of the day"),
     event("task_started"),
   ];
   await writeFile(file, lines.join("\n") + "\n");
   const info = await readRolloutInfo(file, (await stat(file)).size);
   assert.equal(info?.meta.id, "u1");
-  assert.equal(info?.title, "задача дня");
+  assert.equal(info?.title, "task of the day");
   assert.equal(info?.status, "running");
 });
 
@@ -113,7 +115,7 @@ test("readRolloutInfo takes activity time from messages and task events, not boo
   const file = join(dir, "rollout-act.jsonl");
   const lines = [
     meta({ id: "u1", timestamp: "2026-09-08T14:00:00.000Z", cwd: "/w", thread_source: "user" }),
-    stampedUser("вопрос", "2026-09-08T14:59:31.546Z"),
+    stampedUser("question", "2026-09-08T14:59:31.546Z"),
     stamped("task_started", "2026-09-08T14:59:31.600Z"),
     stamped("task_complete", "2026-09-08T14:59:40.000Z"),
     stamped("thread_settings_applied", "2026-09-29T10:37:44.229Z"),
@@ -131,7 +133,7 @@ test("readRolloutInfo finds the activity time beyond 64 KB of bookkeeping", asyn
   const filler = Array.from({ length: 300 }, () => stamped("token_count", "2026-09-29T10:00:00.000Z", { pad: "x".repeat(400) }));
   const lines = [
     meta({ id: "u2", thread_source: "user", cwd: "/w" }),
-    stampedUser("вопрос", "2026-09-08T14:59:31.546Z"),
+    stampedUser("question", "2026-09-08T14:59:31.546Z"),
     stamped("task_started", "2026-09-08T14:59:32.000Z"),
     ...filler,
   ];
@@ -156,7 +158,7 @@ test("an abandoned task_started older than 30 minutes is idle, a fresh one is ru
   const file = join(dir, "rollout-stale.jsonl");
   const lines = [
     meta({ id: "u4", thread_source: "user", cwd: "/w" }),
-    stampedUser("вопрос", "2026-09-08T14:59:31.546Z"),
+    stampedUser("question", "2026-09-08T14:59:31.546Z"),
     stamped("task_started", "2026-09-08T14:59:32.000Z"),
     stamped("item_completed", "2026-09-08T14:59:33.000Z"),
     stamped("thread_settings_applied", "2026-09-29T10:37:44.229Z"),

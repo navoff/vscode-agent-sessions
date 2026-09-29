@@ -15,7 +15,7 @@ export interface MachineInput {
   isLocal: boolean;
   state: MachineState;
   error?: string;
-  home?: string; // домашняя папка удалённой машины из hello демона
+  home?: string; // remote machine home directory, from the daemon hello
 }
 
 export interface SessionNode {

@@ -18,21 +18,21 @@ async function makeCodexDir(): Promise<string> {
   await mkdir(day, { recursive: true });
   await writeFile(
     join(day, "rollout-2026-09-28T11-01-41-u1.jsonl"),
-    [meta({ id: "u1", timestamp: "2026-09-28T09:01:41.268Z", cwd: "/w", thread_source: "user" }), userMsg("первый промпт"), event("task_started"), event("task_complete")].join("\n") + "\n",
+    [meta({ id: "u1", timestamp: "2026-09-28T09:01:41.268Z", cwd: "/w", thread_source: "user" }), userMsg("first prompt"), event("task_started"), event("task_complete")].join("\n") + "\n",
   );
   await writeFile(
     join(day, "rollout-2026-09-28T11-02-00-g1.jsonl"),
     meta({ id: "g1", thread_source: "guardian_review", parent_thread_id: "u1", cwd: "/w" }) + "\n",
   );
   await writeFile(join(day, "notes.txt"), "ignore");
-  await writeFile(join(dir, "session_index.jsonl"), JSON.stringify({ id: "u1", thread_name: "Старое" }) + "\n" + JSON.stringify({ id: "u1", thread_name: "Новое имя" }) + "\n");
+  await writeFile(join(dir, "session_index.jsonl"), JSON.stringify({ id: "u1", thread_name: "Old name" }) + "\n" + JSON.stringify({ id: "u1", thread_name: "New name" }) + "\n");
   return dir;
 }
 
 test("readSessionIndex keeps the last name per id", async () => {
   const dir = await makeCodexDir();
   const idx = await readSessionIndex(join(dir, "session_index.jsonl"));
-  assert.equal(idx.get("u1"), "Новое имя");
+  assert.equal(idx.get("u1"), "New name");
   assert.equal((await readSessionIndex("/nope/index.jsonl")).size, 0);
 });
 
@@ -49,7 +49,7 @@ test("snapshot returns user threads with index titles and statuses", async () =>
   const list = await p.snapshot();
   assert.equal(list.length, 1);
   assert.equal(list[0].id, "u1");
-  assert.equal(list[0].title, "Новое имя");
+  assert.equal(list[0].title, "New name");
   assert.equal(list[0].status, "idle");
   assert.equal(list[0].cwd, "/w");
   assert.equal(list[0].createdAt, Date.parse("2026-09-28T09:01:41.268Z"));
@@ -59,7 +59,7 @@ test("snapshot picks up appended events and falls back to the first prompt", asy
   const dir = await makeCodexDir();
   await writeFile(join(dir, "session_index.jsonl"), "");
   const p = new CodexProvider({ codexDir: dir });
-  assert.equal((await p.snapshot())[0].title, "первый промпт");
+  assert.equal((await p.snapshot())[0].title, "first prompt");
   const file = join(dir, "sessions", "2026", "09", "28", "rollout-2026-09-28T11-01-41-u1.jsonl");
   await new Promise((r) => setTimeout(r, 20));
   await appendFile(file, event("task_started") + "\n");
@@ -221,7 +221,7 @@ test("snapshot uses the last activity time instead of the file mtime", async () 
     join(day, "rollout-2026-09-08T16-59-19-old1.jsonl"),
     [
       meta({ id: "old1", timestamp: "2026-09-08T14:00:00.000Z", cwd: "/w", thread_source: "user" }),
-      userMsg("старый вопрос"),
+      userMsg("old question"),
       stampedEvent("task_started", "2026-09-08T14:59:31.600Z"),
       stampedEvent("task_complete", "2026-09-08T14:59:40.000Z"),
       stampedEvent("thread_settings_applied", "2026-09-29T10:37:44.229Z"),
