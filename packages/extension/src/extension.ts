@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentKind } from "@agent-sessions/core";
 import { MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
-import { connectLocalDaemon } from "./connection/localConnection.js";
+import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnection.js";
+import { daemonBuildId, daemonFreshForMs } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { registerSessionCommands, type FilterState } from "./commands.js";
@@ -21,7 +22,8 @@ const LOCAL_ID = "local";
 const FILTER_KEY = "agentSessions.filter";
 const AUTO_RESTART_INTERVAL_MS = 60_000;
 
-// Injected by esbuild from packages/daemon/package.json; absent under tsc.
+// Injected by esbuild from packages/daemon/package.json; absent under tsc. The
+// full daemon version adds a hash of the bundled daemon.mjs, see daemonBuildId.
 declare const __DAEMON_VERSION__: string | undefined;
 const BUNDLED_DAEMON_VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : undefined;
 
@@ -40,6 +42,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const store = new SessionStore(new SessionMarks(context.globalState));
   const connections = new Map<string, MachineConnection>();
   const daemonPath = context.asAbsolutePath("dist/daemon.mjs");
+  let bundledDaemonVersion: string | undefined;
+  if (BUNDLED_DAEMON_VERSION !== undefined) {
+    try {
+      bundledDaemonVersion = `${BUNDLED_DAEMON_VERSION}+${await daemonBuildId(daemonPath)}`;
+    } catch (err) {
+      appendLog(`[${LOCAL_ID}] cannot hash ${daemonPath}: ${String(err)}`);
+    }
+  }
   const machinesPath = join(context.globalStorageUri.fsPath, "machines.json");
   const loadedMachines = await readMachinesFile(machinesPath);
   let machines: MachinesFile = loadedMachines ?? { version: 1, machines: [] };
@@ -102,13 +112,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onStateChange: (state, error) => {
           appendLog(`[${id}] ${state}${error ? `: ${error}` : ""}`);
           refresh();
-          if (id === LOCAL_ID && state === "connected") {
-            const running = conn?.daemonVersion;
-            if (BUNDLED_DAEMON_VERSION !== undefined && running !== undefined && running !== BUNDLED_DAEMON_VERSION) {
-              appendLog(`[${id}] local daemon ${running} differs from bundled ${BUNDLED_DAEMON_VERSION}, restarting`);
-              restartLocalDaemon(true);
-            }
-          }
+          if (id === LOCAL_ID && state === "connected") checkLocalDaemonVersion(conn);
         },
         onSessions: (sessions) => {
           store.setMachineSessions(id, sessions);
@@ -138,6 +142,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const disconnect = (id: string) => {
     dropConnection(id);
     refresh();
+  };
+
+  // Restarts the shared daemon when its version differs from the bundled one,
+  // unless it was started less than a minute ago (see daemonFreshForMs); then
+  // checks again once that minute is over.
+  let versionCheckTimer: ReturnType<typeof setTimeout> | undefined;
+  const checkLocalDaemonVersion = (c: MachineConnection | undefined) => {
+    const running = c?.daemonVersion;
+    if (!c || bundledDaemonVersion === undefined || running === undefined || running === bundledDaemonVersion) return;
+    void daemonFreshForMs(localDaemonPaths().version, running, Date.now()).then((freshMs) => {
+      if (connections.get(LOCAL_ID) !== c || c.state !== "connected" || c.daemonVersion !== running) return;
+      if (freshMs > 0) {
+        appendLog(`[${LOCAL_ID}] local daemon ${running} differs from bundled ${bundledDaemonVersion} but was just started, checking again in ${Math.ceil(freshMs / 1000)} s`);
+        if (versionCheckTimer) clearTimeout(versionCheckTimer);
+        versionCheckTimer = setTimeout(() => {
+          versionCheckTimer = undefined;
+          checkLocalDaemonVersion(c);
+        }, freshMs + 100);
+        return;
+      }
+      appendLog(`[${LOCAL_ID}] local daemon ${running} differs from bundled ${bundledDaemonVersion}, restarting`);
+      restartLocalDaemon(true);
+    });
   };
 
   // Asks the shared daemon to stop and reconnects, which starts a fresh one.
@@ -263,7 +290,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("agentSessions")) refresh();
     }),
-    { dispose: () => { if (reloadTimer) clearTimeout(reloadTimer); if (restartTimer) clearTimeout(restartTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
+    { dispose: () => { if (reloadTimer) clearTimeout(reloadTimer); if (restartTimer) clearTimeout(restartTimer); if (versionCheckTimer) clearTimeout(versionCheckTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
     log,
   );
 

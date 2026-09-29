@@ -1,16 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:net";
-import { chmod, mkdtemp, writeFile, utimes, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile, utimes, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, connectSocket, ensureSharedDaemon, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
+import { acquireLock, connectSocket, daemonBuildId, daemonFreshForMs, ensureSharedDaemon, releaseLock, sharedDaemonPaths, shouldReplaceSocket, socketDir, tailOfLog } from "../connection/sharedDaemon.js";
 
 test("socketDir prefers XDG_RUNTIME_DIR and falls back to home", () => {
   assert.equal(socketDir({ XDG_RUNTIME_DIR: "/run/user/1" }, "/home/u"), "/run/user/1/agent-sessions");
   assert.equal(socketDir({}, "/Users/u"), "/Users/u/.local/share/agent-sessions");
   const p = sharedDaemonPaths("/x");
-  assert.deepEqual(p, { socket: "/x/daemon.sock", lock: "/x/daemon.lock", log: "/x/daemon.log" });
+  assert.deepEqual(p, { socket: "/x/daemon.sock", lock: "/x/daemon.lock", log: "/x/daemon.log", version: "/x/daemon.version" });
 });
 
 test("acquireLock is exclusive and ignores stale locks", async () => {
@@ -148,4 +149,24 @@ test("acquireLock gives up on a stale lock it cannot remove", async (t) => {
   } finally {
     await chmod(dir, 0o700);
   }
+});
+
+test("daemonBuildId is the first 12 hex digits of the file's sha256", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "as-build-"));
+  const file = join(dir, "daemon.mjs");
+  await writeFile(file, "console.log('daemon');\n");
+  const expected = createHash("sha256").update(await readFile(file)).digest("hex").slice(0, 12);
+  assert.equal(await daemonBuildId(file), expected);
+  assert.match(expected, /^[0-9a-f]{12}$/);
+});
+
+test("daemonFreshForMs protects a daemon whose version file is young and matches", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "as-version-"));
+  const file = join(dir, "daemon.version");
+  assert.equal(await daemonFreshForMs(file, "0.1.0+aaa", Date.now()), 0, "missing file");
+  await writeFile(file, "0.1.0+aaa");
+  const mtime = (await stat(file)).mtimeMs;
+  assert.equal(await daemonFreshForMs(file, "0.1.0+aaa", mtime + 10_000), 50_000);
+  assert.equal(await daemonFreshForMs(file, "0.1.0+bbb", mtime + 10_000), 0, "another daemon's file");
+  assert.equal(await daemonFreshForMs(file, "0.1.0+aaa", mtime + 61_000), 0, "old file");
 });

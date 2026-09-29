@@ -1,6 +1,11 @@
 import { homedir } from "node:os";
 import { type DaemonProcess } from "./machineConnection.js";
-import { ensureSharedDaemon, sharedDaemonPaths, socketDir, spawnDetachedDaemon, tailOfLog } from "./sharedDaemon.js";
+import { ensureSharedDaemon, sharedDaemonPaths, type SharedDaemonPaths, socketDir, spawnDetachedDaemon, tailOfLog } from "./sharedDaemon.js";
+
+/** Paths of the machine-wide daemon's socket, lock, log and marker files. */
+export function localDaemonPaths(): SharedDaemonPaths {
+  return sharedDaemonPaths(socketDir(process.env, homedir()));
+}
 
 /**
  * Connects to the machine-wide daemon over its unix socket, starting it when
@@ -8,7 +13,7 @@ import { ensureSharedDaemon, sharedDaemonPaths, socketDir, spawnDetachedDaemon, 
  * the connection, never the shared daemon.
  */
 export async function connectLocalDaemon(daemonPath: string, log: (line: string) => void): Promise<DaemonProcess> {
-  const paths = sharedDaemonPaths(socketDir(process.env, homedir()));
+  const paths = localDaemonPaths();
   const socket = await ensureSharedDaemon({
     paths,
     log: (m) => log(`[local] ${m}`),

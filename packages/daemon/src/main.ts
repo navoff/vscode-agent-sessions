@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
-import { mkdir } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ClaudeProvider, CodexProvider } from "@agent-sessions/core";
 import { Daemon } from "./daemon.js";
 import { parseClientMessage, type DaemonMessage } from "./protocol.js";
@@ -9,6 +12,19 @@ import { removeStaleSocket, serveOnSocket, type SocketServer } from "./server.js
 
 declare const __DAEMON_VERSION__: string | undefined;
 const VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : "0.0.0-dev";
+
+/**
+ * The first 12 hex digits of the sha256 of this bundle. The extension hashes
+ * its bundled copy the same way, so any change to daemon.mjs changes the
+ * reported version without a manual package.json bump.
+ */
+function buildId(): string {
+  try {
+    return createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex").slice(0, 12);
+  } catch {
+    return "unknown";
+  }
+}
 
 // On stdin close we must let any in-flight refresh (triggered by a "snapshot"
 // message) land before stopping the daemon and exiting, otherwise the reply can
@@ -24,6 +40,7 @@ export function main(argv: string[]): void {
     process.stdout.write(`${VERSION}\n`);
     return;
   }
+  const version = `${VERSION}+${buildId()}`;
   const home = homedir();
   const log = (msg: string) => process.stderr.write(`[daemon] ${msg}\n`);
   const providers = [
@@ -42,9 +59,11 @@ export function main(argv: string[]): void {
       await mkdir(dirname(socketPath), { recursive: true });
       await removeStaleSocket(socketPath);
       let server!: SocketServer;
-      const daemon = new Daemon({ providers, version: VERSION, home, log, onStop: () => server.finish() });
+      const daemon = new Daemon({ providers, version, home, log, onStop: () => server.finish() });
       server = await serveOnSocket(daemon, socketPath, { idleTimeoutMs: IDLE_TIMEOUT_MS, log });
-      log(`listening on ${socketPath}`);
+      // Read by the extension before an automatic restart, see daemonFreshForMs.
+      await writeFile(join(dirname(socketPath), "daemon.version"), version);
+      log(`listening on ${socketPath} (version ${version}, pid ${process.pid})`);
       const stop = () => daemon.stop();
       process.on("SIGTERM", stop);
       process.on("SIGINT", stop);
@@ -69,7 +88,7 @@ export function main(argv: string[]): void {
   // stop() runs on "shutdown"; exit on the next turn so anything written just
   // before is flushed. A protocol mismatch only detaches the client and is
   // handled in the line handler below.
-  const daemon = new Daemon({ providers, version: VERSION, home, log, onStop: () => setImmediate(exit) });
+  const daemon = new Daemon({ providers, version, home, log, onStop: () => setImmediate(exit) });
   const client = daemon.attach(send);
   const rl = createInterface({ input: process.stdin });
   rl.on("line", (line) => {

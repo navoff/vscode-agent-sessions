@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,10 +30,10 @@ function run(args: string[], env: Record<string, string>, input?: string, keepSt
   });
 }
 
-test("--version prints a version", async () => {
+test("--version prints the package version only", async () => {
   const r = await run(["--version"], {});
   assert.equal(r.code, 0);
-  assert.match(r.out.trim(), /^\d+\.\d+\.\d+/);
+  assert.match(r.out.trim(), /^\d+\.\d+\.\d+$/);
 });
 
 test("stdio session answers hello and snapshot, exits on stdin close", async () => {
@@ -80,7 +80,10 @@ test("--listen serves a socket and exits on shutdown", async () => {
   assert.ok(socket, "socket did not come up");
   const line = new Promise<string>((r) => { let buf = ""; socket!.on("data", (d) => { buf += d; const i = buf.indexOf("\n"); if (i >= 0) r(buf.slice(0, i)); }); });
   socket.write('{"type":"hello","protocol":1}\n');
-  assert.equal(JSON.parse(await line).type, "hello");
+  const hello = JSON.parse(await line);
+  assert.equal(hello.type, "hello");
+  assert.match(hello.daemonVersion, /^\d+\.\d+\.\d+\+[0-9a-f]{12}$/);
+  assert.equal(await readFile(join(home, "daemon.version"), "utf8"), hello.daemonVersion);
   socket.write('{"type":"shutdown"}\n');
   assert.equal(await exited, 0);
 });

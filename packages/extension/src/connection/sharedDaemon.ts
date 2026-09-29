@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { openSync, closeSync } from "node:fs";
-import { mkdir, open, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 
@@ -8,6 +9,8 @@ export interface SharedDaemonPaths {
   socket: string;
   lock: string;
   log: string;
+  /** Written by the daemon at startup: its reported version. */
+  version: string;
 }
 
 export function socketDir(env: NodeJS.ProcessEnv, home: string): string {
@@ -16,7 +19,36 @@ export function socketDir(env: NodeJS.ProcessEnv, home: string): string {
 }
 
 export function sharedDaemonPaths(dir: string): SharedDaemonPaths {
-  return { socket: join(dir, "daemon.sock"), lock: join(dir, "daemon.lock"), log: join(dir, "daemon.log") };
+  return { socket: join(dir, "daemon.sock"), lock: join(dir, "daemon.lock"), log: join(dir, "daemon.log"), version: join(dir, "daemon.version") };
+}
+
+/**
+ * The first 12 hex digits of the sha256 of the daemon bundle at `path`. The
+ * daemon computes the same over its own file and reports
+ * `<package version>+<build id>`, so any rebuild changes its identity.
+ */
+export async function daemonBuildId(path: string): Promise<string> {
+  return createHash("sha256").update(await readFile(path)).digest("hex").slice(0, 12);
+}
+
+/**
+ * How many more milliseconds the running daemon counts as freshly started, or
+ * 0. The daemon writes its version to `versionFile` at startup; when that file
+ * names the running version and is younger than `maxAgeMs`, some window has
+ * just started this daemon on purpose (possibly one with a different bundle),
+ * and an automatic restart now would only make windows with different
+ * bundles replace each other's daemon back and forth. Build ids are not
+ * ordered, so "newer" cannot be decided; instead every daemon gets at least
+ * `maxAgeMs` before another window may auto-restart it.
+ */
+export async function daemonFreshForMs(versionFile: string, runningVersion: string, now: number, maxAgeMs = 60_000): Promise<number> {
+  try {
+    const [text, st] = await Promise.all([readFile(versionFile, "utf8"), stat(versionFile)]);
+    if (text.trim() !== runningVersion) return 0;
+    return Math.max(0, st.mtimeMs + maxAgeMs - now);
+  } catch {
+    return 0;
+  }
 }
 
 /**
