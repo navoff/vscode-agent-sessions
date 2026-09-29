@@ -59,6 +59,11 @@ export class SessionStore {
     this.marks.setHidden(markKey(machineId, session), hidden);
   }
 
+  /** Forgets the hidden and last-seen marks of a deleted session. */
+  forget(machineId: string, session: Pick<SessionInfo, "agent" | "id">): void {
+    this.marks.forget(markKey(machineId, session));
+  }
+
   private isUnread(key: string, session: SessionInfo): boolean {
     if (session.status === "running") return false;
     const seen = this.marks.lastSeen(key);

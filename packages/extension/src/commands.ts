@@ -13,6 +13,8 @@ export interface CommandDeps {
   refresh(): void;
   getFilter(): FilterState;
   setFilter(f: FilterState): void;
+  /** Deletes a session through the daemon of its machine. */
+  deleteSession(machineId: string, agent: AgentKind, id: string): Promise<void>;
   log: vscode.OutputChannel;
 }
 
@@ -117,6 +119,30 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     const term = vscode.window.createTerminal({ name: `${s.session.agent}: ${s.session.title}`, cwd: s.session.cwd || undefined });
     term.show();
     term.sendText(cmd, false);
+  });
+  reg("agentSessions.deleteSession", async (node) => {
+    const s = sessionOf(node);
+    if (!s || !checkSessionId(s.session.id)) return;
+    const { machineId, session } = s;
+    if (session.status === "running") {
+      void vscode.window.showWarningMessage(`"${session.title}" is running. Wait until it finishes or stop it before deleting.`);
+      return;
+    }
+    const pick = await vscode.window.showWarningMessage(`Delete "${session.title}" permanently? This cannot be undone.`, { modal: true }, "Delete");
+    if (pick !== "Delete") return;
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Deleting "${session.title}"` }, () =>
+        deps.deleteSession(machineId, session.agent, session.id),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      deps.log.appendLine(`[${machineId}] delete ${session.agent}:${session.id} failed: ${msg}`);
+      void vscode.window.showErrorMessage(`Cannot delete "${session.title}": ${msg}`);
+      return;
+    }
+    deps.log.appendLine(`[${machineId}] deleted ${session.agent}:${session.id}`);
+    deps.store.forget(machineId, session);
+    deps.refresh();
   });
   reg("agentSessions.refresh", () => deps.refresh());
   reg("agentSessions.showLog", () => deps.log.show());

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentKind } from "@agent-sessions/core";
-import { MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
+import { isProtocolMismatch, MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
 import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnection.js";
 import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
@@ -113,6 +113,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           appendLog(`[${id}] ${state}${error ? `: ${error}` : ""}`);
           refresh();
           if (id === LOCAL_ID && state === "connected") checkLocalDaemonVersion(conn);
+          if (state === "error" && isProtocolMismatch(error)) {
+            if (id === LOCAL_ID) onLocalProtocolMismatch(conn);
+            else onRemoteProtocolMismatch(id, error ?? "");
+          }
         },
         onSessions: (sessions) => {
           store.setMachineSessions(id, sessions);
@@ -120,7 +124,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         onWarning: (message) => appendLog(`[${id}] ${message}`),
       },
-      { autoReconnect: id === LOCAL_ID || (machines.machines.find((x) => x.id === id)?.autoConnect ?? false) },
+      {
+        autoReconnect: id === LOCAL_ID || (machines.machines.find((x) => x.id === id)?.autoConnect ?? false),
+        // A remote daemon is replaced only by Prepare Machine; retrying cannot help.
+        retryOnProtocolMismatch: id === LOCAL_ID,
+      },
     );
     connections.set(id, conn);
     return conn;
@@ -165,6 +173,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       appendLog(`[${LOCAL_ID}] local daemon ${running} differs from bundled ${bundledDaemonVersion}, restarting`);
       void restartLocalDaemon(true);
     });
+  };
+
+  // A shared daemon that speaks another protocol (such as one started by an
+  // older version still running) never says hello, so the version check above
+  // never runs. Restart it the same way, with the same one-minute grace for a
+  // daemon that some window has just started; the connection keeps retrying
+  // meanwhile, and every failed attempt comes back here.
+  const onLocalProtocolMismatch = (c: MachineConnection | undefined) => {
+    if (!c || versionCheckTimer || restarting) return;
+    const versionFile = localDaemonPaths().version;
+    void readFile(versionFile, "utf8")
+      .then((t) => t.trim(), () => "")
+      .then((running) => daemonFreshForMs(versionFile, running, Date.now()))
+      .then((freshMs) => {
+        if (connections.get(LOCAL_ID) !== c || c.state === "connected" || versionCheckTimer) return;
+        if (freshMs > 0) {
+          appendLog(`[${LOCAL_ID}] local daemon speaks another protocol but was just started, restarting it in ${Math.ceil(freshMs / 1000)} s`);
+          versionCheckTimer = setTimeout(() => {
+            versionCheckTimer = undefined;
+            if (connections.get(LOCAL_ID) === c && c.state !== "connected") void restartLocalDaemon(true);
+          }, freshMs + 100);
+          return;
+        }
+        appendLog(`[${LOCAL_ID}] local daemon speaks another protocol, restarting`);
+        void restartLocalDaemon(true);
+      });
+  };
+
+  // A remote daemon from an older (or newer) extension: only Prepare Machine
+  // replaces it, so offer that instead of retrying.
+  const onRemoteProtocolMismatch = (id: string, error: string) => {
+    const m = machines.machines.find((x) => x.id === id);
+    if (!m) return;
+    void vscode.window
+      .showWarningMessage(`${m.name}: the daemon there is from another version of the extension (${error}). Run Prepare Machine to update it.`, "Prepare Machine")
+      .then(async (pick) => {
+        if (pick !== "Prepare Machine") return;
+        const before = machines.machines.find((x) => x.id === id);
+        await vscode.commands.executeCommand("agentSessions.prepareMachine", { kind: "machine", machine: { id, name: m.name, isLocal: false, state: "error" }, projects: [] });
+        // A successful prepare saves a new record for the machine; a failed one has shown its error.
+        const after = machines.machines.find((x) => x.id === id);
+        if (after && after !== before) connect(id);
+      });
   };
 
   // Asks the shared daemon to stop, kills it when it does not exit (a hung
@@ -280,6 +331,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     store,
     refresh,
     log,
+    deleteSession: (machineId, agent, id) => {
+      const c = connections.get(machineId);
+      return c ? c.deleteSession(agent, id) : Promise.reject(new Error("the machine is not connected"));
+    },
     getFilter: () => filter,
     setFilter: (f) => {
       filter = f;

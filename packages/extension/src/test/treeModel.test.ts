@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { SessionInfo } from "@agent-sessions/core";
-import { buildTree, relativeTime, sessionDescription, sessionIconName, shortenCwd, type MachineInput } from "../tree/treeModel.js";
+import { buildTree, relativeTime, sessionContextValue, sessionDescription, sessionIconName, shortenCwd, type MachineInput } from "../tree/treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 const s = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/home/u/work/a", createdAt: 1, updatedAt: 1000, status: "idle", ...over });
@@ -89,4 +90,36 @@ test("projects without workspace match are ordered by their newest session", () 
   const projects = tree[0].projects;
   assert.deepEqual(projects.map((p) => p.label), ["/p1", "/p2"]);
   assert.deepEqual(projects[0].sessions.map((n) => n.row.session.id), ["p1run", "p1new"]);
+});
+
+test("sessionContextValue names place, agent, marks and status", () => {
+  assert.equal(sessionContextValue(row("local", s("a"))), "session:local:claude:visible:read:idle");
+  assert.equal(sessionContextValue(row("hz", s("a", { agent: "codex", status: "running" }), { hidden: true, unread: true })), "session:remote:codex:hidden:unread:running");
+  assert.equal(sessionContextValue(row("local", s("a", { status: "unknown" }))), "session:local:claude:visible:read:idle");
+});
+
+interface MenuItem { command: string; when?: string }
+// package.json sits next to out/, two levels above this compiled test.
+const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+  contributes: { commands: Array<{ command: string; enablement?: string }>; menus: { "view/item/context": MenuItem[] } };
+};
+/** Evaluates the `viewItem =~ /re/` part of a when clause; other terms are taken as true. */
+function matchesViewItem(clause: string | undefined, contextValue: string): boolean {
+  const m = clause?.match(/viewItem =~ \/(.+?)\/(?:\s|$)/);
+  return m ? new RegExp(m[1]).test(contextValue) : true;
+}
+function sessionMenu(contextValue: string): string[] {
+  const enablement = new Map(manifest.contributes.commands.map((c) => [c.command, c.enablement]));
+  return manifest.contributes.menus["view/item/context"]
+    .filter((i) => matchesViewItem(i.when, contextValue) && matchesViewItem(enablement.get(i.command), contextValue))
+    .map((i) => i.command.replace("agentSessions.", ""));
+}
+
+test("session menu entries in package.json follow the contextValue", () => {
+  const cv = (machineId: string, over: Partial<SessionInfo>, marks: Partial<SessionRow> = {}) => sessionContextValue(row(machineId, s("a", over), marks));
+  assert.deepEqual(sessionMenu(cv("local", {})), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", {}, { unread: true, hidden: true })), ["openSession", "resumeInTerminal", "markRead", "unhideSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", { status: "running" })), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "copySessionId"]);
+  assert.deepEqual(sessionMenu(cv("hz", { agent: "codex" })), ["markUnread", "hideSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", { agent: "opencode" })), ["openSession", "markUnread", "hideSession", "copySessionId", "deleteSession"]);
 });

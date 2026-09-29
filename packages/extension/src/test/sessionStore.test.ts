@@ -46,6 +46,19 @@ test("hidden flag is stored per machine and session", () => {
   assert.equal(mem.get("hidden/local/claude:a"), undefined);
 });
 
+test("forget drops the hidden and last-seen marks of one session only", () => {
+  const mem = new MemStore();
+  const store = new SessionStore(new SessionMarks(mem));
+  store.setMachineSessions("local", map(s("a"), s("b")));
+  store.setMachineSessions("hetzner", map(s("a")));
+  store.setHidden("local", s("a"), true);
+  store.forget("local", s("a"));
+  assert.equal(mem.get("hidden/local/claude:a"), undefined);
+  assert.equal(mem.get("seen/local/claude:a"), undefined);
+  assert.equal(mem.get("seen/local/claude:b"), 100);
+  assert.equal(mem.get("seen/hetzner/claude:a"), 100);
+});
+
 test("removeMachine drops rows, find returns session", () => {
   const store = new SessionStore(new SessionMarks(new MemStore()));
   store.setMachineSessions("m", map(s("a")));

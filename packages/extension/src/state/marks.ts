@@ -30,4 +30,10 @@ export class SessionMarks {
   setLastSeen(key: string, ts: number): void {
     void this.store.update(`seen/${key}`, ts);
   }
+
+  /** Drops every mark of a session, such as after it was deleted. */
+  forget(key: string): void {
+    void this.store.update(`hidden/${key}`, undefined);
+    void this.store.update(`seen/${key}`, undefined);
+  }
 }

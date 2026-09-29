@@ -74,6 +74,23 @@ export function sessionIconName(row: SessionRow): string {
   return row.session.agent;
 }
 
+/**
+ * The session's contextValue, matched by the `when` clauses in package.json:
+ * `session:<local|remote>:<agent>:<hidden|visible>:<unread|read>:<running|idle>`.
+ * Any status other than "running" counts as idle.
+ */
+export function sessionContextValue(row: SessionRow): string {
+  const s = row.session;
+  return [
+    "session",
+    row.machineId === "local" ? "local" : "remote",
+    s.agent,
+    row.hidden ? "hidden" : "visible",
+    row.unread ? "unread" : "read",
+    s.status === "running" ? "running" : "idle",
+  ].join(":");
+}
+
 function sortRows(rows: SessionRow[]): SessionRow[] {
   return [...rows].sort((a, b) => {
     const ar = a.session.status === "running" ? 0 : 1;

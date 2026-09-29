@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { buildTree, sessionDescription, sessionIconName, type MachineInput, type MachineNode, type TreeNode } from "./treeModel.js";
+import { buildTree, sessionContextValue, sessionDescription, sessionIconName, type MachineInput, type MachineNode, type TreeNode } from "./treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 export interface TreeSource {
@@ -84,8 +84,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     md.appendText(s.id);
     md.appendMarkdown(`\n- Created: ${new Date(s.createdAt).toLocaleString()}\n- Updated: ${new Date(s.updatedAt).toLocaleString()}\n`);
     item.tooltip = md;
-    const isLocal = row.machineId === "local";
-    item.contextValue = `session:${isLocal ? "local" : "remote"}:${s.agent}:${row.hidden ? "hidden" : "visible"}:${row.unread ? "unread" : "read"}`;
+    item.contextValue = sessionContextValue(row);
     item.command = { command: "agentSessions.openSession", title: "Open Session", arguments: [node] };
     return item;
   }
