@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
+import { isValidSessionId } from "../util/sessionId.js";
 import { guardWatcher } from "../util/watch.js";
 import { indexSessionFiles, readLastMessageTimestamp } from "./activity.js";
 import { isProcessAlive, readClaudeRegistry } from "./registry.js";
@@ -18,10 +19,13 @@ export interface SdkSessionInfo {
 }
 
 export type ListSessions = () => Promise<SdkSessionInfo[]>;
+export type DeleteSession = (sessionId: string) => Promise<void>;
 
 export interface ClaudeProviderOptions {
   claudeDir?: string;
   listSessions?: ListSessions;
+  /** Replaces the SDK's deleteSession; for tests. */
+  deleteSession?: DeleteSession;
   isAlive?: (pid: number) => boolean;
   log?: (msg: string) => void;
 }
@@ -29,6 +33,11 @@ export interface ClaudeProviderOptions {
 async function sdkListSessions(): Promise<SdkSessionInfo[]> {
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
   return (await sdk.listSessions({})) as SdkSessionInfo[];
+}
+
+async function sdkDeleteSession(sessionId: string): Promise<void> {
+  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  await sdk.deleteSession(sessionId);
 }
 
 interface ActivityEntry {
@@ -41,6 +50,7 @@ export class ClaudeProvider implements SessionProvider {
   readonly agent = "claude" as const;
   private readonly claudeDir: string;
   private readonly listSessions: ListSessions;
+  private readonly deleteSession: DeleteSession;
   private readonly isAlive: (pid: number) => boolean;
   private readonly log: (msg: string) => void;
   private readonly activity = new Map<string, ActivityEntry>();
@@ -48,6 +58,7 @@ export class ClaudeProvider implements SessionProvider {
   constructor(opts: ClaudeProviderOptions = {}) {
     this.claudeDir = opts.claudeDir ?? join(homedir(), ".claude");
     this.listSessions = opts.listSessions ?? sdkListSessions;
+    this.deleteSession = opts.deleteSession ?? sdkDeleteSession;
     this.isAlive = opts.isAlive ?? isProcessAlive;
     this.log = opts.log ?? (() => {});
   }
@@ -87,6 +98,19 @@ export class ClaudeProvider implements SessionProvider {
       if (live) info.live = { pid: live.pid, statusUpdatedAt: live.statusUpdatedAt };
       return info;
     });
+  }
+
+  /**
+   * Deletes the session transcript and its subagent transcripts through the
+   * SDK. A session that is working right now (busy in the registry) is
+   * refused: its process would keep writing to the deleted transcript.
+   */
+  async delete(id: string): Promise<void> {
+    if (!isValidSessionId(id)) throw new Error(`invalid Claude session id ${JSON.stringify(id.slice(0, 80))}`);
+    const registry = await readClaudeRegistry(join(this.claudeDir, "sessions"), this.isAlive);
+    if (registry.get(id)?.status === "busy") throw new Error("the session is running, wait until it finishes or stop it before deleting");
+    await this.deleteSession(id);
+    this.log(`claude: deleted session ${id}`);
   }
 
   private async messageTime(path: string): Promise<number | undefined> {

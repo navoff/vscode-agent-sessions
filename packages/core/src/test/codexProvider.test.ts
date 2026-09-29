@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSessionIndex } from "../codex/sessionIndex.js";
 import { listRolloutFiles } from "../codex/discovery.js";
-import { CodexProvider } from "../codex/provider.js";
+import { CodexProvider, type CommandResult, type CommandRunner } from "../codex/provider.js";
 
 const meta = (payload: Record<string, unknown>) => JSON.stringify({ type: "session_meta", payload });
 const userMsg = (text: string) =>
@@ -97,4 +97,77 @@ test("snapshot keeps the newest file when two rollouts share an id", async () =>
   assert.equal(list.length, 1);
   assert.equal(list[0].id, "d1");
   assert.equal(list[0].updatedAt, Math.trunc(newerStat.mtimeMs));
+});
+
+interface Call { file: string; args: string[]; env: NodeJS.ProcessEnv; timeoutMs: number }
+function recorder(results: Array<CommandResult | NodeJS.ErrnoException>) {
+  const calls: Call[] = [];
+  const run: CommandRunner = async (file, args, opts) => {
+    calls.push({ file, args, env: opts.env, timeoutMs: opts.timeoutMs });
+    const r = results.shift() ?? { code: 0, stdout: "", stderr: "" };
+    if (r instanceof Error) throw r;
+    return r;
+  };
+  return { calls, run };
+}
+const enoent = () => Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" });
+
+test("delete runs codex delete --force with CODEX_HOME and a 30 s timeout", async () => {
+  const dir = await makeCodexDir();
+  const r = recorder([]);
+  const p = new CodexProvider({ codexDir: dir, env: { PATH: "/bin" }, runCommand: r.run });
+  await p.snapshot();
+  await p.delete("u1");
+  assert.equal(r.calls.length, 1);
+  assert.equal(r.calls[0].file, "codex");
+  assert.deepEqual(r.calls[0].args, ["delete", "--force", "--", "u1"]);
+  assert.equal(r.calls[0].env.CODEX_HOME, dir);
+  assert.equal(r.calls[0].env.PATH, "/bin");
+  assert.equal(r.calls[0].timeoutMs, 30_000);
+});
+
+test("delete uses CODEX_BIN when set and does not fall back", async () => {
+  const dir = await makeCodexDir();
+  const ok = recorder([]);
+  await new CodexProvider({ codexDir: dir, env: { CODEX_BIN: "/opt/codex" }, runCommand: ok.run }).delete("u1");
+  assert.equal(ok.calls[0].file, "/opt/codex");
+  const missing = recorder([enoent()]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, env: { CODEX_BIN: "/opt/codex" }, runCommand: missing.run }).delete("u1"), /CODEX_BIN \/opt\/codex not found/);
+  assert.equal(missing.calls.length, 1);
+});
+
+test("delete retries through a login shell when codex is not on PATH", async () => {
+  const dir = await makeCodexDir();
+  const r = recorder([enoent(), { code: 0, stdout: "", stderr: "" }]);
+  await new CodexProvider({ codexDir: dir, env: {}, runCommand: r.run }).delete("u1");
+  assert.equal(r.calls.length, 2);
+  assert.equal(r.calls[1].file, "bash");
+  assert.deepEqual(r.calls[1].args, ["-lc", 'exec codex delete --force -- "$1"', "_", "u1"]);
+  assert.equal(r.calls[1].env.CODEX_HOME, dir);
+  const notFound = recorder([enoent(), { code: 127, stdout: "", stderr: "bash: codex: command not found" }]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, env: {}, runCommand: notFound.run }).delete("u1"), /not found on PATH or in a login shell/);
+});
+
+test("delete reports a non-zero exit and a timeout with the command's output", async () => {
+  const dir = await makeCodexDir();
+  const failed = recorder([{ code: 1, stdout: "", stderr: "Error: failed to delete session\n" }]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, runCommand: failed.run }).delete("u1"), /codex delete failed \(exit 1\): Error: failed to delete session$/);
+  const hung = recorder([{ code: null, stdout: "", stderr: "" }]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, runCommand: hung.run, deleteTimeoutMs: 5000 }).delete("u1"), /timed out after 5 s/);
+});
+
+test("delete refuses a running session and an invalid id without running anything", async () => {
+  const dir = await makeCodexDir();
+  const file = join(dir, "sessions", "2026", "09", "28", "rollout-2026-09-28T11-01-41-u1.jsonl");
+  await appendFile(file, event("task_started") + "\n");
+  const r = recorder([]);
+  const p = new CodexProvider({ codexDir: dir, runCommand: r.run });
+  assert.equal((await p.snapshot())[0].status, "running");
+  await assert.rejects(p.delete("u1"), /running/);
+  await assert.rejects(p.delete("u1; rm -rf ~"), /invalid Codex session id/);
+  await assert.rejects(p.delete("--help"), /invalid Codex session id/);
+  assert.equal(r.calls.length, 0);
+  // A session the provider has not seen is allowed: codex decides.
+  await p.delete("unknown-id");
+  assert.equal(r.calls.length, 1);
 });

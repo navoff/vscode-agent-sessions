@@ -7,3 +7,4 @@ export * from "./codex/discovery.js";
 export * from "./codex/provider.js";
 export * from "./util/watch.js";
 export * from "./claude/activity.js";
+export * from "./util/sessionId.js";

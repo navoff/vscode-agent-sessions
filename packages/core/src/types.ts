@@ -29,4 +29,6 @@ export interface SessionProvider {
   readonly agent: AgentKind;
   snapshot(): Promise<SessionInfo[]>;
   watch(onChange: () => void): Disposable;
+  /** Permanently deletes a session with the agent's own mechanism; rejects with a readable error. */
+  delete?(id: string): Promise<void>;
 }
