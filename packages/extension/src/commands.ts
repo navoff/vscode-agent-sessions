@@ -15,6 +15,8 @@ export interface CommandDeps {
   setFilter(f: FilterState): void;
   /** Deletes a session through the daemon of its machine. */
   deleteSession(machineId: string, agent: AgentKind, id: string): Promise<void>;
+  /** Current tree selection, for commands run from a keybinding. */
+  selection(): readonly TreeNode[];
   log: vscode.OutputChannel;
 }
 
@@ -79,10 +81,13 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
 export function registerSessionCommands(context: vscode.ExtensionContext, deps: CommandDeps): void {
   const reg = (id: string, fn: (node?: TreeNode) => unknown) =>
     context.subscriptions.push(vscode.commands.registerCommand(id, (node?: TreeNode) => fn(node)));
-  // Multi-select aware: VS Code passes the clicked node and the selection.
+  // Multi-select aware: a context menu passes the clicked node and the
+  // selection; a keybinding passes nothing, so read the selection from the tree.
   const regMulti = (id: string, fn: (targets: SessionNode[]) => unknown) =>
     context.subscriptions.push(
-      vscode.commands.registerCommand(id, (node?: TreeNode, selected?: TreeNode[]) => fn(selectionTargets(node, selected))),
+      vscode.commands.registerCommand(id, (node?: TreeNode, selected?: TreeNode[]) =>
+        fn(selectionTargets(node, node ? selected : deps.selection())),
+      ),
     );
 
   reg("agentSessions.openSession", async (node) => {

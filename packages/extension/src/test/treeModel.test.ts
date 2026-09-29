@@ -117,10 +117,11 @@ test("header toggles with two icons use complementary when clauses", () => {
     assert.equal(palette.get(on), "false");
   }
 });
-/** Evaluates the `viewItem =~ /re/` part of a when clause; other terms are taken as true. */
+/** Evaluates the `viewItem =~ /re/` or `!(viewItem =~ /re/)` part of a when clause; other terms are taken as true. */
 function matchesViewItem(clause: string | undefined, contextValue: string): boolean {
-  const m = clause?.match(/viewItem =~ \/(.+?)\/(?:\s|$)/);
-  return m ? new RegExp(m[1]).test(contextValue) : true;
+  const m = clause?.match(/(!\()?viewItem =~ \/(.+?)\/(?:\)|\s|$)/);
+  if (!m) return true;
+  return new RegExp(m[2]).test(contextValue) !== Boolean(m[1]);
 }
 function sessionMenu(contextValue: string): string[] {
   const enablement = new Map(manifest.contributes.commands.map((c) => [c.command, c.enablement]));

@@ -100,7 +100,7 @@
         "command": "agentSessions.deleteSession",
         "title": "Delete Session…",
         "category": "Agent Sessions",
-        "enablement": "viewItem =~ /^session:.*:idle$/"
+        "enablement": "!(viewItem =~ /^session:.*:running$/)"
       },
       {
         "command": "agentSessions.toggleRemote",
@@ -184,6 +184,14 @@
         "command": "agentSessions.restartLocalDaemon",
         "title": "Restart Local Daemon",
         "category": "Agent Sessions"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "agentSessions.deleteSession",
+        "key": "delete",
+        "mac": "cmd+backspace",
+        "when": "focusedView == agentSessions.view && !inputFocus"
       }
     ],
     "menus": {

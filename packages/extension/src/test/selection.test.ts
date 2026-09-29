@@ -22,6 +22,13 @@ test("falls back to the clicked node when the selection does not contain it", ()
   assert.deepEqual(selectionTargets(a, undefined).map((n) => n.row.session.id), ["a"]);
 });
 
+test("uses the whole selection when no node is passed (keybinding)", () => {
+  const a = node("a");
+  const b = node("b");
+  assert.deepEqual(selectionTargets(undefined, [a, project, b]).map((n) => n.row.session.id), ["a", "b"]);
+  assert.deepEqual(selectionTargets(undefined, undefined), []);
+});
+
 test("ignores non-session clicks and duplicates", () => {
   assert.deepEqual(selectionTargets(project, [project]), []);
   assert.deepEqual(selectionTargets(undefined, []), []);

@@ -102,7 +102,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.Uri.joinPath(context.extensionUri, "resources"),
     homedir(),
   );
-  context.subscriptions.push(tree, vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true }));
+  const treeView = vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true });
+  context.subscriptions.push(tree, treeView);
   const refresh = () => tree.refresh();
 
   const makeConnection = (id: string): MachineConnection | undefined => {
@@ -379,6 +380,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const c = connections.get(machineId);
       return c ? c.deleteSession(agent, id) : Promise.reject(new Error("the machine is not connected"));
     },
+    selection: () => treeView.selection,
     getFilter: () => filter,
     setFilter: (f) => {
       filter = f;
