@@ -5,6 +5,7 @@ import type { SessionRow } from "../state/sessionStore.js";
 export interface TreeFilter {
   agents: Set<AgentKind> | undefined;
   showRemote: boolean;
+  workspaceOnly: boolean;
   showHidden: boolean;
 }
 
@@ -118,8 +119,12 @@ export function buildTree(
   const ordered = [...machines].sort((a, b) => Number(b.isLocal) - Number(a.isLocal));
   for (const machine of ordered) {
     if (!machine.isLocal && !filter.showRemote) continue;
+    const onlyWorkspace = filter.workspaceOnly && machine.isLocal && opts.workspaceFolders.length > 0;
     const rows = (rowsByMachine.get(machine.id) ?? []).filter(
-      (r) => (filter.showHidden || !r.hidden) && (!filter.agents || filter.agents.has(r.session.agent)),
+      (r) =>
+        (filter.showHidden || !r.hidden) &&
+        (!filter.agents || filter.agents.has(r.session.agent)) &&
+        (!onlyWorkspace || isWorkspace(r.session.cwd, opts.workspaceFolders)),
     );
     const byCwd = new Map<string, SessionRow[]>();
     for (const r of rows) {

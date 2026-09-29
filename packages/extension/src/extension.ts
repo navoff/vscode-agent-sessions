@@ -67,7 +67,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const cfg = () => vscode.workspace.getConfiguration("agentSessions");
   const sshPath = () => cfg().get<string>("ssh.path", "ssh");
 
-  let filter: FilterState = context.workspaceState.get<FilterState>(FILTER_KEY) ?? { agents: undefined, showRemote: true };
+  const stored = context.workspaceState.get<Partial<FilterState>>(FILTER_KEY);
+  let filter: FilterState = {
+    agents: stored?.agents,
+    showRemote: stored?.showRemote ?? true,
+    workspaceOnly: stored?.workspaceOnly === true,
+  };
+  const updateFilterContext = () => {
+    const active = filter.agents !== undefined || filter.workspaceOnly || !filter.showRemote;
+    void vscode.commands.executeCommand("setContext", "agentSessions.filterActive", active);
+  };
+  updateFilterContext();
 
   const tree = new SessionsTreeProvider(
     {
@@ -81,7 +91,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return list;
       },
       rows: () => new Map<string, SessionRow[]>(store.machineIds().map((id) => [id, store.rows(id)])),
-      filter: () => ({ agents: filter.agents ? new Set<AgentKind>(filter.agents) : undefined, showRemote: filter.showRemote, showHidden: cfg().get<boolean>("showHidden", false) }),
+      filter: () => ({ agents: filter.agents ? new Set<AgentKind>(filter.agents) : undefined, showRemote: filter.showRemote, workspaceOnly: filter.workspaceOnly, showHidden: cfg().get<boolean>("showHidden", false) }),
       machineEnabled: (id) => machines.machines.find((m) => m.id === id)?.enabled ?? true,
     },
     vscode.Uri.joinPath(context.extensionUri, "resources"),
@@ -367,6 +377,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     getFilter: () => filter,
     setFilter: (f) => {
       filter = f;
+      updateFilterContext();
       void context.workspaceState.update(FILTER_KEY, f);
     },
   });

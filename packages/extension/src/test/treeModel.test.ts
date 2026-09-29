@@ -51,7 +51,7 @@ test("buildTree groups by machine and project, sorts and filters", () => {
     ["hz", [row("hz", s("r1", { cwd: "/home/navoff/x" }))]],
     ["hz2", [row("hz2", s("r2", { cwd: "/srv/app" }))]],
   ]);
-  const tree = buildTree([local, remote, remoteNoHome], rows, { agents: undefined, showRemote: true, showHidden: false }, opts);
+  const tree = buildTree([local, remote, remoteNoHome], rows, { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false }, opts);
   assert.deepEqual(tree.map((m) => m.machine.id), ["local", "hz", "hz2"]);
   const projects = tree[0].projects;
   assert.deepEqual(projects.map((p) => p.label), ["~/work/b", "~/work/a"]);
@@ -60,19 +60,19 @@ test("buildTree groups by machine and project, sorts and filters", () => {
   assert.equal(tree[1].projects[0].label, "~/x");
   assert.equal(tree[2].projects[0].label, "/srv/app");
 
-  const noRemote = buildTree([local, remote], rows, { agents: undefined, showRemote: false, showHidden: false }, opts);
+  const noRemote = buildTree([local, remote], rows, { agents: undefined, showRemote: false, workspaceOnly: false, showHidden: false }, opts);
   assert.deepEqual(noRemote.map((m) => m.machine.id), ["local"]);
 
-  const codexOnly = buildTree([local, remote], rows, { agents: new Set(["codex"]), showRemote: true, showHidden: false }, opts);
+  const codexOnly = buildTree([local, remote], rows, { agents: new Set(["codex"]), showRemote: true, workspaceOnly: false, showHidden: false }, opts);
   assert.equal(codexOnly[0].projects.length, 1);
   assert.equal(codexOnly[0].projects[0].sessions[0].row.session.id, "cx");
 
-  const withHidden = buildTree([local], rows, { agents: undefined, showRemote: true, showHidden: true }, opts);
+  const withHidden = buildTree([local], rows, { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: true }, opts);
   assert.ok(withHidden[0].projects[1].sessions.some((n) => n.row.session.id === "hid"));
 });
 
 test("machine without sessions still appears with no projects", () => {
-  const tree = buildTree([remote], new Map(), { agents: undefined, showRemote: true, showHidden: false }, opts);
+  const tree = buildTree([remote], new Map(), { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false }, opts);
   assert.equal(tree.length, 1);
   assert.deepEqual(tree[0].projects, []);
 });
@@ -86,7 +86,7 @@ test("projects without workspace match are ordered by their newest session", () 
     ]],
   ]);
   const noWorkspace = { home: "/home/u", workspaceFolders: [] };
-  const tree = buildTree([local], rows, { agents: undefined, showRemote: true, showHidden: false }, noWorkspace);
+  const tree = buildTree([local], rows, { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false }, noWorkspace);
   const projects = tree[0].projects;
   assert.deepEqual(projects.map((p) => p.label), ["/p1", "/p2"]);
   assert.deepEqual(projects[0].sessions.map((n) => n.row.session.id), ["p1run", "p1new"]);
@@ -122,4 +122,29 @@ test("session menu entries in package.json follow the contextValue", () => {
   assert.deepEqual(sessionMenu(cv("local", { status: "running" })), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "copySessionId"]);
   assert.deepEqual(sessionMenu(cv("hz", { agent: "codex" })), ["markUnread", "hideSession", "copySessionId", "deleteSession"]);
   assert.deepEqual(sessionMenu(cv("local", { agent: "opencode" })), ["openSession", "markUnread", "hideSession", "copySessionId", "deleteSession"]);
+});
+
+test("workspaceOnly keeps only local rows under workspace folders and leaves remote alone", () => {
+  const rows = new Map<string, SessionRow[]>([
+    ["local", [
+      row("local", s("in", { cwd: "/home/u/work/b" })),
+      row("local", s("sub", { cwd: "/home/u/work/b/sub" })),
+      row("local", s("sibling", { cwd: "/home/u/work/bb" })),
+      row("local", s("out", { cwd: "/home/u/work/a" })),
+    ]],
+    ["hz", [row("hz", s("r1", { cwd: "/home/navoff/x" }))]],
+  ]);
+  const filter = { agents: undefined, showRemote: true, workspaceOnly: true, showHidden: false };
+  const tree = buildTree([local, remote], rows, filter, opts);
+  const ids = tree[0].projects.flatMap((p) => p.sessions.map((n) => n.row.session.id)).sort();
+  assert.deepEqual(ids, ["in", "sub"]);
+  assert.equal(tree[1].projects[0].sessions.length, 1);
+});
+
+test("workspaceOnly has no effect without workspace folders", () => {
+  const rows = new Map<string, SessionRow[]>([
+    ["local", [row("local", s("a", { cwd: "/p1" })), row("local", s("b", { cwd: "/p2" }))]],
+  ]);
+  const tree = buildTree([local], rows, { agents: undefined, showRemote: true, workspaceOnly: true, showHidden: false }, { home: "/home/u", workspaceFolders: [] });
+  assert.equal(tree[0].projects.length, 2);
 });

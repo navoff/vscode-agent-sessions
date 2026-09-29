@@ -1,12 +1,10 @@
 import * as vscode from "vscode";
 import { isValidSessionId, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
+import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState } from "./tree/filterPicker.js";
 import type { TreeNode } from "./tree/treeModel.js";
 
-export interface FilterState {
-  agents: AgentKind[] | undefined;
-  showRemote: boolean;
-}
+export type { FilterState };
 
 export interface CommandDeps {
   store: SessionStore;
@@ -162,16 +160,19 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     await cfg.update("showHidden", !cfg.get<boolean>("showHidden", false), vscode.ConfigurationTarget.Global);
     deps.refresh();
   });
-  reg("agentSessions.filterAgents", async () => {
-    const all: AgentKind[] = ["claude", "codex", "opencode"];
-    const current = deps.getFilter().agents;
-    const picks = await vscode.window.showQuickPick(
-      all.map((a) => ({ label: a, picked: !current || current.includes(a) })),
-      { canPickMany: true, title: "Show sessions of agents" },
+  const filterSessions = async () => {
+    const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+    const items = buildFilterItems(deps.getFilter(), hasWorkspace).map((i): vscode.QuickPickItem & { id?: FilterPickId } =>
+      i.kind === "separator"
+        ? { label: i.label, kind: vscode.QuickPickItemKind.Separator }
+        : { id: i.id, label: i.label, description: i.description, picked: i.picked },
     );
+    const picks = await vscode.window.showQuickPick(items, { canPickMany: true, title: "Filter sessions" });
     if (!picks) return;
-    const chosen = picks.map((p) => p.label as AgentKind);
-    deps.setFilter({ ...deps.getFilter(), agents: chosen.length === all.length ? undefined : chosen });
+    const ids = picks.flatMap((p) => ((p as { id?: FilterPickId }).id ? [(p as { id: FilterPickId }).id] : []));
+    deps.setFilter(applyFilterPicks(ids));
     deps.refresh();
-  });
+  };
+  reg("agentSessions.filterAgents", filterSessions);
+  reg("agentSessions.filterSessionsActive", filterSessions);
 }

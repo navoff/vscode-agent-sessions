@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
-import { buildTree, sessionContextValue, sessionDescription, sessionIconName, type MachineInput, type MachineNode, type TreeNode } from "./treeModel.js";
+import { buildTree, sessionContextValue, sessionDescription, sessionIconName, type MachineInput, type MachineNode, type TreeFilter, type TreeNode } from "./treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 export interface TreeSource {
   machines(): MachineInput[];
   rows(): Map<string, SessionRow[]>;
-  filter(): { agents: Set<"claude" | "codex" | "opencode"> | undefined; showRemote: boolean; showHidden: boolean };
+  filter(): TreeFilter;
   machineEnabled(machineId: string): boolean;
 }
 
