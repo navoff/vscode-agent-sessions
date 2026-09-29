@@ -87,6 +87,16 @@
         "category": "Agent Sessions"
       },
       {
+        "command": "agentSessions.hideProject",
+        "title": "Hide Folder",
+        "category": "Agent Sessions"
+      },
+      {
+        "command": "agentSessions.unhideProject",
+        "title": "Unhide Folder",
+        "category": "Agent Sessions"
+      },
+      {
         "command": "agentSessions.copySessionId",
         "title": "Copy Session ID",
         "category": "Agent Sessions"
@@ -279,6 +289,31 @@
           "group": "9_delete@1"
         },
         {
+          "command": "agentSessions.markRead",
+          "when": "view == agentSessions.view && viewItem =~ /^project:.*:unread$/",
+          "group": "2_marks@1"
+        },
+        {
+          "command": "agentSessions.markUnread",
+          "when": "view == agentSessions.view && viewItem =~ /^project:.*:read$/",
+          "group": "2_marks@2"
+        },
+        {
+          "command": "agentSessions.hideProject",
+          "when": "view == agentSessions.view && viewItem =~ /^project:visible:/",
+          "group": "2_marks@3"
+        },
+        {
+          "command": "agentSessions.unhideProject",
+          "when": "view == agentSessions.view && viewItem =~ /^project:hidden:/",
+          "group": "2_marks@4"
+        },
+        {
+          "command": "agentSessions.deleteSession",
+          "when": "view == agentSessions.view && viewItem =~ /^project:/",
+          "group": "9_delete@1"
+        },
+        {
           "command": "agentSessions.connectMachine",
           "when": "view == agentSessions.view && viewItem =~ /^machine:.*:(disconnected|error)$/",
           "group": "inline@1"
@@ -337,6 +372,14 @@
         },
         {
           "command": "agentSessions.unhideSession",
+          "when": "false"
+        },
+        {
+          "command": "agentSessions.hideProject",
+          "when": "false"
+        },
+        {
+          "command": "agentSessions.unhideProject",
           "when": "false"
         },
         {

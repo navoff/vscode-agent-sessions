@@ -29,7 +29,18 @@ test("uses the whole selection when no node is passed (keybinding)", () => {
   assert.deepEqual(selectionTargets(undefined, undefined), []);
 });
 
-test("ignores non-session clicks and duplicates", () => {
+test("a folder expands into its sessions, without duplicating a selected session", () => {
+  const a = node("a");
+  const b = node("b");
+  const folder: ProjectNode = { ...project, sessions: [a, b] };
+  assert.deepEqual(selectionTargets(folder, undefined).map((n) => n.row.session.id), ["a", "b"]);
+  assert.deepEqual(selectionTargets(folder, [a, folder]).map((n) => n.row.session.id), ["a", "b"]);
+  assert.deepEqual(selectionTargets(undefined, [folder, node("c")]).map((n) => n.row.session.id), ["a", "b", "c"]);
+  assert.deepEqual(selectionTargets(folder, [a]).map((n) => n.row.session.id), ["a", "b"]);
+});
+
+test("ignores machine clicks and duplicates", () => {
+  assert.deepEqual(selectionTargets(machine, [machine]), []);
   assert.deepEqual(selectionTargets(project, [project]), []);
   assert.deepEqual(selectionTargets(undefined, []), []);
   const a = node("a");

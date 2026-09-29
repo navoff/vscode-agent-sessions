@@ -188,11 +188,9 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     for (const n of targets) deps.store.markRead(n.machineId, n.row.session, now);
     if (targets.length > 0) deps.refresh();
   });
-  reg("agentSessions.markUnread", (node) => {
-    const s = sessionOf(node);
-    if (!s) return;
-    deps.store.markUnread(s.machineId, s.session);
-    deps.refresh();
+  regMulti("agentSessions.markUnread", (targets) => {
+    for (const n of targets) deps.store.markUnread(n.machineId, n.row.session);
+    if (targets.length > 0) deps.refresh();
   });
   regMulti("agentSessions.hideSession", (targets) => {
     for (const n of targets) deps.store.setHidden(n.machineId, n.row.session, true);
@@ -204,6 +202,14 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     deps.store.setHidden(s.machineId, s.session, false);
     deps.refresh();
   });
+  // Folder hiding is a mark of its own, so the sessions keep theirs.
+  const setProjectHidden = (node: TreeNode | undefined, hidden: boolean) => {
+    if (!node || node.kind !== "project") return;
+    deps.store.setProjectHidden(node.machineId, node.cwd, hidden);
+    deps.refresh();
+  };
+  reg("agentSessions.hideProject", (node) => setProjectHidden(node, true));
+  reg("agentSessions.unhideProject", (node) => setProjectHidden(node, false));
   reg("agentSessions.copySessionId", async (node) => {
     const s = sessionOf(node);
     if (s && checkSessionId(s.session.id)) await vscode.env.clipboard.writeText(s.session.id);
