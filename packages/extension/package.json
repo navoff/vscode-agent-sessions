@@ -91,7 +91,14 @@
       "properties": {
         "agentSessions.autoConnectOnStartup": { "type": "boolean", "default": true, "description": "Connect the local machine and machines marked autoConnect when VS Code starts." },
         "agentSessions.ssh.path": { "type": "string", "default": "ssh", "description": "Path to the ssh binary used for remote machines." },
-        "agentSessions.showHidden": { "type": "boolean", "default": false, "description": "Show hidden sessions in the tree." }
+        "agentSessions.showHidden": { "type": "boolean", "default": false, "description": "Show hidden sessions in the tree." },
+      "agentSessions.codex.openTarget": {
+        "type": "string",
+        "enum": ["sidebar", "panel"],
+        "enumDescriptions": ["Open the thread in the Codex side bar (deep link).", "Open the thread as a Codex Chat editor tab in the main panel."],
+        "default": "sidebar",
+        "description": "Where a Codex session opens on click."
+      }
       }
     }
   },

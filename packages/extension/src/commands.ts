@@ -30,6 +30,25 @@ function checkSessionId(id: string): boolean {
   return false;
 }
 
+const CODEX_EDITOR_VIEW_TYPE = "chatgpt.conversationEditor";
+
+/** Codex custom-editor URI for a local thread: openai-codex://route/local/<id>. */
+export function codexConversationUri(sessionId: string): vscode.Uri {
+  return vscode.Uri.file(`/local/${sessionId}`).with({ scheme: "openai-codex", authority: "route" });
+}
+
+async function openCodexThread(sessionId: string): Promise<void> {
+  const target = vscode.workspace.getConfiguration("agentSessions").get<string>("codex.openTarget", "sidebar");
+  if (target === "panel") {
+    await vscode.commands.executeCommand("vscode.openWith", codexConversationUri(sessionId), CODEX_EDITOR_VIEW_TYPE, {
+      preview: false,
+      preserveFocus: false,
+    });
+    return;
+  }
+  await vscode.env.openExternal(vscode.Uri.parse(`vscode://openai.chatgpt/local/${encodeURIComponent(sessionId)}`));
+}
+
 async function offerInstall(extensionId: string, name: string): Promise<void> {
   const pick = await vscode.window.showErrorMessage(`${name} extension is not installed.`, "Install");
   if (pick === "Install") await vscode.commands.executeCommand("workbench.extensions.installExtension", extensionId);
@@ -46,7 +65,7 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
     if (!vscode.extensions.getExtension(CODEX_EXTENSION)) return offerInstall(CODEX_EXTENSION, "Codex");
-    await vscode.env.openExternal(vscode.Uri.parse(`vscode://openai.chatgpt/local/${encodeURIComponent(session.id)}`));
+    await openCodexThread(session.id);
   } else {
     void vscode.window.showInformationMessage(`Opening ${session.agent} sessions is not supported yet.`);
     return;
