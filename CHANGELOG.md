@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 - 2026-09-29
 
 - Remote sessions open in a Remote-SSH window on their folder. The daemon
   protocol is now 3; run Prepare Machine on remote machines after updating.
