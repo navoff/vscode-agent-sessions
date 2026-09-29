@@ -46,6 +46,21 @@ test("hidden flag is stored per machine and session", () => {
   assert.equal(mem.get("hidden/local/claude:a"), undefined);
 });
 
+test("a hidden folder is independent of the hidden marks of its sessions", () => {
+  const mem = new MemStore();
+  const store = new SessionStore(new SessionMarks(mem));
+  store.setMachineSessions("local", map(s("a"), s("b")));
+  store.setHidden("local", s("a"), true);
+  store.setProjectHidden("local", "/w", true);
+  assert.equal(store.isProjectHidden("local", "/w"), true);
+  assert.equal(store.isProjectHidden("hetzner", "/w"), false);
+  assert.equal(mem.get("hiddenProject/local//w"), true);
+  store.setProjectHidden("local", "/w", false);
+  assert.equal(store.isProjectHidden("local", "/w"), false);
+  assert.equal(mem.get("hiddenProject/local//w"), undefined);
+  assert.deepEqual(store.rows("local").map((r) => r.hidden), [true, false]);
+});
+
 test("forget drops the hidden and last-seen marks of one session only", () => {
   const mem = new MemStore();
   const store = new SessionStore(new SessionMarks(mem));

@@ -59,6 +59,14 @@ export class SessionStore {
     this.marks.setHidden(markKey(machineId, session), hidden);
   }
 
+  isProjectHidden(machineId: string, cwd: string): boolean {
+    return this.marks.isProjectHidden(machineId, cwd);
+  }
+
+  setProjectHidden(machineId: string, cwd: string, hidden: boolean): void {
+    this.marks.setProjectHidden(machineId, cwd, hidden);
+  }
+
   /** Forgets the hidden and last-seen marks of a deleted session. */
   forget(machineId: string, session: Pick<SessionInfo, "agent" | "id">): void {
     this.marks.forget(markKey(machineId, session));

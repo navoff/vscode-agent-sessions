@@ -22,6 +22,15 @@ export class SessionMarks {
     void this.store.update(`hidden/${key}`, hidden ? true : undefined);
   }
 
+  /** A folder hidden as a whole; independent of the hidden marks of its sessions. */
+  isProjectHidden(machineId: string, cwd: string): boolean {
+    return this.store.get<boolean>(`hiddenProject/${machineId}/${cwd}`) === true;
+  }
+
+  setProjectHidden(machineId: string, cwd: string, hidden: boolean): void {
+    void this.store.update(`hiddenProject/${machineId}/${cwd}`, hidden ? true : undefined);
+  }
+
   lastSeen(key: string): number | undefined {
     const v = this.store.get<number>(`seen/${key}`);
     return typeof v === "number" ? v : undefined;
