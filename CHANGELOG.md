@@ -4,6 +4,9 @@
 
 - "New Session…" in a folder's context menu starts a Claude Code or Codex
   session in that folder, opening a window on it when needed.
+- A session whose tab is active in the focused window counts as read: work
+  that finishes while you watch it, or that you return to by clicking its
+  tab, no longer leaves it marked unread.
 
 ## 0.1.3 - 2026-09-29
 

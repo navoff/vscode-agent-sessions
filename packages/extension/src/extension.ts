@@ -11,19 +11,22 @@ import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnecti
 import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
-import { openSession, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
-import { isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
+import { CODEX_EDITOR_VIEW_TYPE, openSession, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
+import { claudeFindsSession, isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
 import { SessionMarks } from "./state/marks.js";
 import { SessionStore, type SessionRow } from "./state/sessionStore.js";
+import { codexTabSessionId, pickViewed, tabCandidates, type AgentTab } from "./state/viewedSession.js";
 import type { MachineInput } from "./tree/treeModel.js";
 import { SessionsTreeProvider } from "./tree/treeProvider.js";
 
 const LOCAL_ID = "local";
 const FILTER_KEY = "agentSessions.filter";
 const AUTO_RESTART_INTERVAL_MS = 60_000;
+// VS Code prefixes the view type of a webview panel in its tab input.
+const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
 
 // Injected by esbuild from packages/daemon/package.json; absent under tsc. The
 // full daemon version adds a hash of the bundled daemon.mjs, see daemonBuildId.
@@ -108,6 +111,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(tree, treeView);
   const refresh = () => tree.refresh();
 
+  // A session whose tab is in front of the user in this focused window is
+  // being read, so activity that arrives meanwhile, or that the user comes
+  // back to, does not leave it unread. Agent views outside the editor area
+  // (the Claude Code and Codex sidebars) are not tabs and are not seen here.
+  const activeAgentTab = (): AgentTab | undefined => {
+    if (!vscode.window.state.focused) return undefined;
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const input = tab?.input;
+    if (input instanceof vscode.TabInputWebview && input.viewType.endsWith(CLAUDE_PANEL_VIEW_TYPE)) return { agent: "claude", label: tab?.label ?? "" };
+    if (input instanceof vscode.TabInputCustom && input.viewType === CODEX_EDITOR_VIEW_TYPE && input.uri.scheme === "openai-codex") {
+      const sessionId = codexTabSessionId(input.uri.path);
+      if (sessionId) return { agent: "codex", sessionId };
+    }
+    return undefined;
+  };
+  const markViewedRead = async (): Promise<void> => {
+    const tab = activeAgentTab();
+    if (!tab) return;
+    let candidates = tabCandidates(tab, store.rows(LOCAL_ID));
+    if (!candidates.some((r) => r.unread)) return;
+    if (tab.agent === "claude") {
+      // Claude Code shows only sessions of the window folder; a session of the
+      // same title elsewhere is not the one in the tab.
+      const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+      const reachable: SessionRow[] = [];
+      for (const r of candidates) if (await claudeFindsSession(r.session.cwd, folders)) reachable.push(r);
+      candidates = reachable;
+    }
+    const viewed = pickViewed(candidates);
+    if (!viewed?.unread) return;
+    store.markRead(LOCAL_ID, viewed.session, Date.now());
+    refresh();
+  };
+  const onViewChange = () => {
+    markViewedRead().catch((err) => appendLog(`[${LOCAL_ID}] marking the viewed session read failed: ${String(err)}`));
+  };
+  context.subscriptions.push(
+    vscode.window.tabGroups.onDidChangeTabs(onViewChange),
+    vscode.window.tabGroups.onDidChangeTabGroups(onViewChange),
+    vscode.window.onDidChangeWindowState(onViewChange),
+  );
+
   const makeConnection = (id: string): MachineConnection | undefined => {
     const existing = connections.get(id);
     if (existing) return existing;
@@ -141,6 +186,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         onSessions: (sessions) => {
           store.setMachineSessions(id, sessions);
           refresh();
+          if (id === LOCAL_ID) onViewChange();
         },
         onWarning: (message) => appendLog(`[${id}] ${message}`),
       },

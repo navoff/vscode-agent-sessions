@@ -21,7 +21,8 @@ agents' own session stores instead and stays out of their way.
   event in the rollout, so an abandoned turn is not shown as running forever.
 - **Unread marks.** A session that finished work since you last opened it is
   marked with `●`. Opening a session in Claude Code or Codex does not count
-  as activity, so merely looking at old sessions keeps them read.
+  as activity, so merely looking at old sessions keeps them read. A session
+  whose tab is active in the focused window is read as it goes.
 - **Opens in the native plugin.** Double-click a Claude session and it opens
   in the Claude Code extension; a Codex session opens in the Codex plugin,
   in its side bar or in an editor tab. "Resume in Terminal" prepares the CLI
@@ -63,7 +64,7 @@ agents' own session stores instead and stays out of their way.
 | Open a Claude session of another folder | Claude Code finds only sessions of the folder open in its window and its git worktrees, so such a session offers "Open Folder in New Window", which then opens the session there, or "Resume in Terminal". |
 | Resume in a terminal | "Resume in Terminal" opens a terminal in the session folder with `claude --resume <id>` or `codex resume <id>` typed in, not run. |
 | Start a new session | "New Session…" in a folder's context menu asks for the agent, Claude Code or Codex, and starts a session in that folder: in this window when the folder is open in it, otherwise in a new window on the folder, a Remote-SSH one for a remote machine. |
-| Mark read / unread | Context menu. Opening a session marks it read. |
+| Mark read / unread | Context menu. Opening a session marks it read, and so does having its editor tab active in the focused window: switching to the tab or back to the window clears the mark. A session shown in the Claude Code or Codex sidebar is not detected. |
 | Hide / unhide | "Hide Session" removes a session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; hide, delete and mark-as-read then apply to the whole selection. |

@@ -39,7 +39,7 @@ function checkSessionId(id: string): boolean {
   return false;
 }
 
-const CODEX_EDITOR_VIEW_TYPE = "chatgpt.conversationEditor";
+export const CODEX_EDITOR_VIEW_TYPE ="chatgpt.conversationEditor";
 
 /** Codex custom-editor URI for a local thread: openai-codex://route/local/<id>. */
 export function codexConversationUri(sessionId: string): vscode.Uri {
