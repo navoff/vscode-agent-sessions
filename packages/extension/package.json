@@ -74,6 +74,11 @@
         "category": "Agent Sessions"
       },
       {
+        "command": "agentSessions.newSession",
+        "title": "New Session…",
+        "category": "Agent Sessions"
+      },
+      {
         "command": "agentSessions.markRead",
         "title": "Mark as Read",
         "category": "Agent Sessions"
@@ -296,6 +301,11 @@
           "group": "9_delete@1"
         },
         {
+          "command": "agentSessions.newSession",
+          "when": "view == agentSessions.view && viewItem =~ /^project:/",
+          "group": "1_open@1"
+        },
+        {
           "command": "agentSessions.markRead",
           "when": "view == agentSessions.view && viewItem =~ /^project:.*:unread$/",
           "group": "2_marks@1"
@@ -363,6 +373,10 @@
         },
         {
           "command": "agentSessions.clickSession",
+          "when": "false"
+        },
+        {
+          "command": "agentSessions.newSession",
           "when": "false"
         },
         {

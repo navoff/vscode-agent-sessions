@@ -2,10 +2,10 @@ import * as vscode from "vscode";
 import { isValidSessionId, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
 import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState } from "./tree/filterPicker.js";
-import type { SessionNode, TreeNode } from "./tree/treeModel.js";
+import type { ProjectNode, SessionNode, TreeNode } from "./tree/treeModel.js";
 import { selectionTargets } from "./tree/selection.js";
 import { DoubleClickDetector } from "./tree/clickDetector.js";
-import { claudeFindsSession, isDirectory, remoteFolderUri } from "./claudeFolder.js";
+import { claudeFindsSession, isDirectory, isWindowFolder, newSessionRequest, remoteFolderUri } from "./claudeFolder.js";
 
 export type { FilterState };
 
@@ -90,6 +90,12 @@ function resumeInTerminal(session: SessionInfo): void {
   term.sendText(cmd, false);
 }
 
+/** A folder of the machine this window runs on; in a remote window that is the remote host. */
+function localFolderUri(cwd: string): vscode.Uri {
+  const base = vscode.workspace.workspaceFolders?.[0]?.uri;
+  return base && base.scheme !== "file" ? base.with({ path: cwd }) : vscode.Uri.file(cwd);
+}
+
 /**
  * Claude Code opens a session of another folder as an empty conversation, so
  * offer to open that folder in a new window, which then opens the session.
@@ -110,7 +116,7 @@ async function offerClaudeFolder(deps: CommandDeps, session: SessionInfo): Promi
       void vscode.window.showErrorMessage(`Cannot hand the session over: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(session.cwd), { forceNewWindow: true });
+    await vscode.commands.executeCommand("vscode.openFolder", localFolderUri(session.cwd), { forceNewWindow: true });
   } else if (pick === terminal) {
     resumeInTerminal(session);
   }
@@ -157,6 +163,65 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
   deps.refresh();
 }
 
+/** Starts a new session of `agent` in this window; its extension uses the window folder. */
+export async function startNewSession(agent: AgentKind): Promise<void> {
+  if (agent === "claude") {
+    if (!vscode.extensions.getExtension(CLAUDE_EXTENSION) && !(await offerInstall(CLAUDE_EXTENSION, "Claude Code"))) return;
+    await vscode.commands.executeCommand("claude-vscode.editor.open");
+  } else if (agent === "codex") {
+    if (!vscode.extensions.getExtension(CODEX_EXTENSION) && !(await offerInstall(CODEX_EXTENSION, "Codex"))) return;
+    const target = vscode.workspace.getConfiguration("agentSessions").get<string>("codex.openTarget", "sidebar");
+    if (target === "panel") {
+      await vscode.commands.executeCommand("chatgpt.newCodexPanel");
+      return;
+    }
+    await vscode.commands.executeCommand("chatgpt.openSidebar");
+    await vscode.commands.executeCommand("chatgpt.newChat");
+  } else {
+    void vscode.window.showInformationMessage(`Starting ${agent} sessions is not supported yet.`);
+  }
+}
+
+const NEW_SESSION_AGENTS: (vscode.QuickPickItem & { agent: AgentKind })[] = [
+  { label: "Claude Code", agent: "claude" },
+  { label: "Codex", agent: "codex" },
+];
+
+/**
+ * Starts a new session in the folder of `node`: here when the window is on
+ * that folder, otherwise in a window opened on it, which picks the request up
+ * like a handed-over session.
+ */
+async function newSession(deps: CommandDeps, node: ProjectNode): Promise<void> {
+  if (!node.cwd) {
+    void vscode.window.showWarningMessage("These sessions have no folder to start a new session in.");
+    return;
+  }
+  if (node.machineId === "local" && !(await isDirectory(node.cwd))) {
+    void vscode.window.showWarningMessage(`${node.cwd} no longer exists, so a session cannot be started in it.`);
+    return;
+  }
+  const pick = await vscode.window.showQuickPick(NEW_SESSION_AGENTS, { title: `New session in ${node.label}` });
+  if (!pick) return;
+  let uri: vscode.Uri;
+  if (node.machineId === "local") {
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    if (await isWindowFolder(node.cwd, folders)) return startNewSession(pick.agent);
+    uri = localFolderUri(node.cwd);
+  } else {
+    const host = deps.sshHost(node.machineId);
+    if (!host) return;
+    uri = vscode.Uri.parse(remoteFolderUri(host, node.cwd));
+  }
+  try {
+    await deps.pendingOpen(node.machineId, newSessionRequest(pick.agent, node.cwd, Date.now()));
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Cannot start a session in ${node.cwd}: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  await vscode.commands.executeCommand("vscode.openFolder", uri, { forceNewWindow: true });
+}
+
 export function registerSessionCommands(context: vscode.ExtensionContext, deps: CommandDeps): void {
   const reg = (id: string, fn: (node?: TreeNode) => unknown) =>
     context.subscriptions.push(vscode.commands.registerCommand(id, (node?: TreeNode) => fn(node)));
@@ -182,6 +247,9 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     const mode = vscode.workspace.getConfiguration("agentSessions").get<string>("openOn", "doubleClick");
     if (mode === "doubleClick" && !clicks.click(`${s.machineId}/${s.session.agent}:${s.session.id}`)) return;
     await openSession(deps, s.machineId, s.session);
+  });
+  reg("agentSessions.newSession", async (node) => {
+    if (node?.kind === "project") await newSession(deps, node);
   });
   regMulti("agentSessions.markRead", (targets) => {
     const now = Date.now();

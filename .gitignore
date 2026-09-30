@@ -4,4 +4,5 @@ out/
 *.vsix
 *.tsbuildinfo
 .superpowers/
+docs/superpowers/
 .demo/

@@ -83,6 +83,9 @@ test("parse delete and deleteResult messages", () => {
 test("parse pendingOpen and pendingOpenResult messages", () => {
   const good = s("claude", "a");
   assert.deepEqual(parseClientMessage(JSON.stringify({ type: "pendingOpen", requestId: "9", session: good })), { type: "pendingOpen", requestId: "9", session: good });
+  // A request for a new session has no id, see newSessionRequest in the extension.
+  const fresh = s("codex", "");
+  assert.deepEqual(parseClientMessage(JSON.stringify({ type: "pendingOpen", requestId: "9", session: fresh })), { type: "pendingOpen", requestId: "9", session: fresh });
   assert.equal(parseClientMessage(JSON.stringify({ type: "pendingOpen", session: good })), undefined);
   assert.equal(parseClientMessage(JSON.stringify({ type: "pendingOpen", requestId: "9", session: { id: "a" } })), undefined);
   assert.deepEqual(parseDaemonMessage('{"type":"pendingOpenResult","requestId":"9","ok":true}'), { type: "pendingOpenResult", requestId: "9", ok: true });

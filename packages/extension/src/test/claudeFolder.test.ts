@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionInfo } from "@agent-sessions/core";
-import { claudeFindsSession, isDirectory, PENDING_OPEN_TTL_MS, pendingSessionFor, remoteFolderUri } from "../claudeFolder.js";
+import { claudeFindsSession, isDirectory, isNewSessionRequest, isWindowFolder, newSessionRequest, PENDING_OPEN_TTL_MS, pendingSessionFor, remoteFolderUri } from "../claudeFolder.js";
 
 const noWorktrees = async () => [];
 const session = (cwd: string): SessionInfo => ({ agent: "claude", id: "a", title: "a", cwd, createdAt: 1, updatedAt: 1, status: "idle" });
@@ -45,6 +45,32 @@ test("a pending session opens only in a window on its folder and only while fres
   assert.equal(await pendingSessionFor({ session: s, at: 1000 }, ["/w"], 1000 + PENDING_OPEN_TTL_MS + 1), undefined);
   assert.equal(await pendingSessionFor({ session: s, at: 1000 }, ["/w"], 500), undefined);
   assert.equal(await pendingSessionFor(undefined, ["/w"], 2000), undefined);
+});
+
+test("a window folder matches exactly, also through a symlink or a trailing slash", async () => {
+  const root = await mkdtemp(join(tmpdir(), "claude-folder-"));
+  const ws = join(root, "ws");
+  await mkdir(join(ws, "sub"), { recursive: true });
+  await symlink(ws, join(root, "link"));
+  assert.equal(await isWindowFolder(ws, [ws]), true);
+  assert.equal(await isWindowFolder(`${ws}/`, [join(root, "link")]), true);
+  assert.equal(await isWindowFolder(join(ws, "sub"), [ws]), false);
+  assert.equal(await isWindowFolder(root, [ws]), false);
+  assert.equal(await isWindowFolder(ws, []), false);
+  assert.equal(await isWindowFolder("", [ws]), false);
+});
+
+test("a new-session request is a session without an id", () => {
+  const r = newSessionRequest("codex", "/w", 5);
+  assert.deepEqual(r, { agent: "codex", id: "", title: "", cwd: "/w", createdAt: 5, updatedAt: 5, status: "unknown" });
+  assert.equal(isNewSessionRequest(r), true);
+  assert.equal(isNewSessionRequest(session("/w")), false);
+});
+
+test("a pending new-session request reaches the window on its folder", async () => {
+  const r = newSessionRequest("claude", "/w", 1000);
+  assert.equal(await pendingSessionFor({ session: r, at: 1000 }, ["/w"], 2000), r);
+  assert.equal(await pendingSessionFor({ session: r, at: 1000 }, ["/other"], 2000), undefined);
 });
 
 test("remoteFolderUri addresses the ssh host and keeps the path readable", () => {

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- "New Session…" in a folder's context menu starts a Claude Code or Codex
+  session in that folder, opening a window on it when needed.
+
 ## 0.1.3 - 2026-09-29
 
 - Folder context menu: mark the sessions of a folder read or unread, delete
