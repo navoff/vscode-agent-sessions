@@ -7,6 +7,8 @@
 - Sessions can be pinned: the pin button on a session, or "Pin Session" in
   its context menu, keeps it at the top of its folder and adds a pin to its
   icon.
+- A session under the pointer gets a hide button to the left of the pin; on
+  a hidden session the same button unhides it.
 - "New Session…" in a folder's context menu, or the plus button on the
   folder, starts a Claude Code or Codex session in that folder, opening a
   window on it when needed.

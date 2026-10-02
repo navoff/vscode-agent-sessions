@@ -92,12 +92,14 @@
       {
         "command": "agentSessions.hideSession",
         "title": "Hide Session",
-        "category": "Agent Sessions"
+        "category": "Agent Sessions",
+        "icon": "$(eye-closed)"
       },
       {
         "command": "agentSessions.unhideSession",
         "title": "Unhide Session",
-        "category": "Agent Sessions"
+        "category": "Agent Sessions",
+        "icon": "$(eye)"
       },
       {
         "command": "agentSessions.pinSession",
@@ -314,14 +316,24 @@
           "group": "2_marks@6"
         },
         {
+          "command": "agentSessions.hideSession",
+          "when": "view == agentSessions.view && viewItem =~ /^session:.*:visible:/",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentSessions.unhideSession",
+          "when": "view == agentSessions.view && viewItem =~ /^session:.*:hidden:/",
+          "group": "inline@1"
+        },
+        {
           "command": "agentSessions.pinSession",
           "when": "view == agentSessions.view && viewItem =~ /^session:.*:unpinned:/",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "agentSessions.unpinSession",
           "when": "view == agentSessions.view && viewItem =~ /^session:.*:pinned:/",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "agentSessions.copySessionId",

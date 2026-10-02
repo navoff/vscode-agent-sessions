@@ -151,6 +151,8 @@ function sessionMenu(contextValue: string, inline = false): string[] {
   return manifest.contributes.menus["view/item/context"]
     .filter((i) => (i.group?.startsWith("inline") ?? false) === inline)
     .filter((i) => matchesViewItem(i.when, contextValue) && matchesViewItem(enablement.get(i.command), contextValue))
+    // VS Code lays the row buttons out by their group, left to right.
+    .sort((a, b) => (inline ? (a.group ?? "").localeCompare(b.group ?? "") : 0))
     .map((i) => i.command.replace("agentSessions.", ""));
 }
 
@@ -163,12 +165,14 @@ test("session menu entries in package.json follow the contextValue", () => {
   assert.deepEqual(sessionMenu(cv("local", { agent: "opencode" })), ["openSession", "markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
 });
 
-test("a session row has one inline button: pin, or unpin once pinned", () => {
+test("a session row has two inline buttons: hide or unhide, then pin or unpin", () => {
   const cv = (over: Partial<SessionInfo>, marks: Partial<SessionRow> = {}) => sessionContextValue(row("local", s("a", over), marks));
-  assert.deepEqual(sessionMenu(cv({}), true), ["pinSession"]);
-  assert.deepEqual(sessionMenu(cv({ status: "running" }), true), ["pinSession"]);
-  assert.deepEqual(sessionMenu(cv({}, { pinned: true }), true), ["unpinSession"]);
-  assert.deepEqual(sessionMenu(cv({ status: "running" }, { pinned: true, hidden: true }), true), ["unpinSession"]);
+  assert.deepEqual(sessionMenu(cv({}), true), ["hideSession", "pinSession"]);
+  assert.deepEqual(sessionMenu(cv({ status: "running" }), true), ["hideSession", "pinSession"]);
+  assert.deepEqual(sessionMenu(cv({}, { pinned: true }), true), ["hideSession", "unpinSession"]);
+  assert.deepEqual(sessionMenu(cv({}, { hidden: true }), true), ["unhideSession", "pinSession"]);
+  assert.deepEqual(sessionMenu(cv({ status: "running" }, { pinned: true, hidden: true }), true), ["unhideSession", "unpinSession"]);
+  assert.deepEqual(sessionMenu(sessionContextValue(row("hz", s("a", { agent: "codex" }))), true), ["hideSession", "pinSession"]);
   // A folder row has the New Session button instead.
   assert.deepEqual(sessionMenu("project:visible:read", true), ["newSession"]);
   assert.deepEqual(sessionMenu("project:hidden:unread", true), ["newSession"]);
