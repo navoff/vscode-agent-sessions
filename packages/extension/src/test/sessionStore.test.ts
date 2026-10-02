@@ -46,6 +46,20 @@ test("hidden flag is stored per machine and session", () => {
   assert.equal(mem.get("hidden/local/claude:a"), undefined);
 });
 
+test("pinned flag is stored per machine and session", () => {
+  const mem = new MemStore();
+  const store = new SessionStore(new SessionMarks(mem));
+  store.setMachineSessions("local", map(s("a")));
+  store.setMachineSessions("hetzner", map(s("a")));
+  assert.equal(store.rows("local")[0].pinned, false);
+  store.setPinned("local", s("a"), true);
+  assert.equal(store.rows("local")[0].pinned, true);
+  assert.equal(store.rows("hetzner")[0].pinned, false);
+  assert.equal(mem.get("pinned/local/claude:a"), true);
+  store.setPinned("local", s("a"), false);
+  assert.equal(mem.get("pinned/local/claude:a"), undefined);
+});
+
 test("a hidden folder is independent of the hidden marks of its sessions", () => {
   const mem = new MemStore();
   const store = new SessionStore(new SessionMarks(mem));
@@ -61,14 +75,16 @@ test("a hidden folder is independent of the hidden marks of its sessions", () =>
   assert.deepEqual(store.rows("local").map((r) => r.hidden), [true, false]);
 });
 
-test("forget drops the hidden and last-seen marks of one session only", () => {
+test("forget drops the hidden, pinned and last-seen marks of one session only", () => {
   const mem = new MemStore();
   const store = new SessionStore(new SessionMarks(mem));
   store.setMachineSessions("local", map(s("a"), s("b")));
   store.setMachineSessions("hetzner", map(s("a")));
   store.setHidden("local", s("a"), true);
+  store.setPinned("local", s("a"), true);
   store.forget("local", s("a"));
   assert.equal(mem.get("hidden/local/claude:a"), undefined);
+  assert.equal(mem.get("pinned/local/claude:a"), undefined);
   assert.equal(mem.get("seen/local/claude:a"), undefined);
   assert.equal(mem.get("seen/local/claude:b"), 100);
   assert.equal(mem.get("seen/hetzner/claude:a"), 100);

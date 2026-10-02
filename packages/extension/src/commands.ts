@@ -270,6 +270,12 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     deps.store.setHidden(s.machineId, s.session, false);
     deps.refresh();
   });
+  const setPinned = (targets: SessionNode[], pinned: boolean) => {
+    for (const n of targets) deps.store.setPinned(n.machineId, n.row.session, pinned);
+    if (targets.length > 0) deps.refresh();
+  };
+  regMulti("agentSessions.pinSession", (targets) => setPinned(targets, true));
+  regMulti("agentSessions.unpinSession", (targets) => setPinned(targets, false));
   // Folder hiding is a mark of its own, so the sessions keep theirs.
   const setProjectHidden = (node: TreeNode | undefined, hidden: boolean) => {
     if (!node || node.kind !== "project") return;

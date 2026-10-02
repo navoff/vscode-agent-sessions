@@ -11,6 +11,7 @@ export interface SessionRow {
   session: SessionInfo;
   hidden: boolean;
   unread: boolean;
+  pinned: boolean;
 }
 
 export class SessionStore {
@@ -43,7 +44,7 @@ export class SessionStore {
     if (!sessions) return [];
     return [...sessions.values()].map((session) => {
       const key = markKey(machineId, session);
-      return { machineId, session, hidden: this.marks.isHidden(key), unread: this.isUnread(key, session) };
+      return { machineId, session, hidden: this.marks.isHidden(key), unread: this.isUnread(key, session), pinned: this.marks.isPinned(key) };
     });
   }
 
@@ -59,6 +60,10 @@ export class SessionStore {
     this.marks.setHidden(markKey(machineId, session), hidden);
   }
 
+  setPinned(machineId: string, session: SessionInfo, pinned: boolean): void {
+    this.marks.setPinned(markKey(machineId, session), pinned);
+  }
+
   isProjectHidden(machineId: string, cwd: string): boolean {
     return this.marks.isProjectHidden(machineId, cwd);
   }
@@ -67,7 +72,7 @@ export class SessionStore {
     this.marks.setProjectHidden(machineId, cwd, hidden);
   }
 
-  /** Forgets the hidden and last-seen marks of a deleted session. */
+  /** Forgets the hidden, pinned and last-seen marks of a deleted session. */
   forget(machineId: string, session: Pick<SessionInfo, "agent" | "id">): void {
     this.marks.forget(markKey(machineId, session));
   }

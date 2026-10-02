@@ -75,14 +75,13 @@ export function sessionDescription(row: SessionRow, now: number): string {
 }
 
 export function sessionIconName(row: SessionRow): string {
-  if (row.hidden) return `${row.session.agent}-hidden`;
-  if (row.unread) return `${row.session.agent}-unread`;
-  return row.session.agent;
+  const mark = row.hidden ? "-hidden" : row.unread ? "-unread" : "";
+  return `${row.session.agent}${mark}${row.pinned ? "-pinned" : ""}`;
 }
 
 /**
  * The session's contextValue, matched by the `when` clauses in package.json:
- * `session:<local|remote>:<agent>:<hidden|visible>:<unread|read>:<running|idle>`.
+ * `session:<local|remote>:<agent>:<hidden|visible>:<unread|read>:<pinned|unpinned>:<running|idle>`.
  * Any status other than "running" counts as idle.
  */
 export function sessionContextValue(row: SessionRow): string {
@@ -93,6 +92,7 @@ export function sessionContextValue(row: SessionRow): string {
     s.agent,
     row.hidden ? "hidden" : "visible",
     row.unread ? "unread" : "read",
+    row.pinned ? "pinned" : "unpinned",
     s.status === "running" ? "running" : "idle",
   ].join(":");
 }
@@ -107,6 +107,7 @@ export function projectContextValue(node: ProjectNode): string {
 
 function sortRows(rows: SessionRow[]): SessionRow[] {
   return [...rows].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     const ar = a.session.status === "running" ? 0 : 1;
     const br = b.session.status === "running" ? 0 : 1;
     if (ar !== br) return ar - br;

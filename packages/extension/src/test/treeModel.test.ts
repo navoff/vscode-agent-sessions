@@ -6,7 +6,7 @@ import { buildTree, projectContextValue, relativeTime, sessionContextValue, sess
 import type { SessionRow } from "../state/sessionStore.js";
 
 const s = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/home/u/work/a", createdAt: 1, updatedAt: 1000, status: "idle", ...over });
-const row = (machineId: string, session: SessionInfo, over: Partial<SessionRow> = {}): SessionRow => ({ machineId, session, hidden: false, unread: false, ...over });
+const row = (machineId: string, session: SessionInfo, over: Partial<SessionRow> = {}): SessionRow => ({ machineId, session, hidden: false, unread: false, pinned: false, ...over });
 const local: MachineInput = { id: "local", name: "This machine", isLocal: true, state: "connected" };
 const remote: MachineInput = { id: "hz", name: "hetzner", isLocal: false, state: "error", error: "ssh failed", home: "/home/navoff" };
 const remoteNoHome: MachineInput = { id: "hz2", name: "hetzner2", isLocal: false, state: "error", error: "ssh failed" };
@@ -28,7 +28,7 @@ test("relativeTime formats coarse buckets", () => {
   assert.equal(relativeTime(now - 2 * 86_400_000, now), "2 d ago");
 });
 
-test("sessionDescription and icon reflect status, unread and hidden", () => {
+test("sessionDescription and icon reflect status, unread, hidden and pinned", () => {
   const now = 1000 + 60_000 * 7;
   assert.equal(sessionDescription(row("local", s("a", { status: "running" })), now), "● running");
   assert.equal(sessionDescription(row("local", s("a"), { unread: true }), now), "7 min ago");
@@ -37,6 +37,9 @@ test("sessionDescription and icon reflect status, unread and hidden", () => {
   assert.equal(sessionIconName(row("local", s("a"), { unread: true })), "claude-unread");
   assert.equal(sessionIconName(row("local", s("a", { agent: "codex" }), { hidden: true })), "codex-hidden");
   assert.equal(sessionIconName(row("local", s("a"))), "claude");
+  assert.equal(sessionIconName(row("local", s("a"), { pinned: true })), "claude-pinned");
+  assert.equal(sessionIconName(row("local", s("a"), { unread: true, pinned: true })), "claude-unread-pinned");
+  assert.equal(sessionIconName(row("local", s("a", { agent: "codex" }), { hidden: true, pinned: true })), "codex-hidden-pinned");
 });
 
 test("buildTree groups by machine and project, sorts and filters", () => {
@@ -92,13 +95,32 @@ test("projects without workspace match are ordered by their newest session", () 
   assert.deepEqual(projects[0].sessions.map((n) => n.row.session.id), ["p1run", "p1new"]);
 });
 
-test("sessionContextValue names place, agent, marks and status", () => {
-  assert.equal(sessionContextValue(row("local", s("a"))), "session:local:claude:visible:read:idle");
-  assert.equal(sessionContextValue(row("hz", s("a", { agent: "codex", status: "running" }), { hidden: true, unread: true })), "session:remote:codex:hidden:unread:running");
-  assert.equal(sessionContextValue(row("local", s("a", { status: "unknown" }))), "session:local:claude:visible:read:idle");
+test("pinned sessions come first in their folder, each group keeps the usual order", () => {
+  const rows = new Map<string, SessionRow[]>([
+    ["local", [
+      row("local", s("run", { status: "running", updatedAt: 5 })),
+      row("local", s("new", { updatedAt: 500 })),
+      row("local", s("pinOld", { updatedAt: 10 }), { pinned: true }),
+      row("local", s("pinRun", { status: "running", updatedAt: 1 }), { pinned: true }),
+      row("local", s("pinNew", { updatedAt: 400 }), { pinned: true }),
+      row("local", s("other", { cwd: "/home/u/work/c", updatedAt: 900 })),
+      row("local", s("otherPin", { cwd: "/home/u/work/d", updatedAt: 1 }), { pinned: true }),
+    ]],
+  ]);
+  const tree = buildTree([local], rows, { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false }, { home: "/home/u", workspaceFolders: [] });
+  const a = tree[0].projects.find((p) => p.cwd === "/home/u/work/a")!;
+  assert.deepEqual(a.sessions.map((n) => n.row.session.id), ["pinRun", "pinNew", "pinOld", "run", "new"]);
+  // A pin does not move its folder.
+  assert.deepEqual(tree[0].projects.map((p) => p.label), ["~/work/c", "~/work/a", "~/work/d"]);
 });
 
-interface MenuItem { command: string; when?: string }
+test("sessionContextValue names place, agent, marks and status", () => {
+  assert.equal(sessionContextValue(row("local", s("a"))), "session:local:claude:visible:read:unpinned:idle");
+  assert.equal(sessionContextValue(row("hz", s("a", { agent: "codex", status: "running" }), { hidden: true, unread: true, pinned: true })), "session:remote:codex:hidden:unread:pinned:running");
+  assert.equal(sessionContextValue(row("local", s("a", { status: "unknown" }))), "session:local:claude:visible:read:unpinned:idle");
+});
+
+interface MenuItem { command: string; when?: string; group?: string }
 // package.json sits next to out/, two levels above this compiled test.
 const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
   contributes: { commands: Array<{ command: string; enablement?: string }>; menus: { "view/item/context": MenuItem[]; "view/title": MenuItem[]; commandPalette: MenuItem[] } };
@@ -123,20 +145,33 @@ function matchesViewItem(clause: string | undefined, contextValue: string): bool
   if (!m) return true;
   return new RegExp(m[2]).test(contextValue) !== Boolean(m[1]);
 }
-function sessionMenu(contextValue: string): string[] {
+/** Context menu commands of a session, or with `inline` the buttons in its row. */
+function sessionMenu(contextValue: string, inline = false): string[] {
   const enablement = new Map(manifest.contributes.commands.map((c) => [c.command, c.enablement]));
   return manifest.contributes.menus["view/item/context"]
+    .filter((i) => (i.group?.startsWith("inline") ?? false) === inline)
     .filter((i) => matchesViewItem(i.when, contextValue) && matchesViewItem(enablement.get(i.command), contextValue))
     .map((i) => i.command.replace("agentSessions.", ""));
 }
 
 test("session menu entries in package.json follow the contextValue", () => {
   const cv = (machineId: string, over: Partial<SessionInfo>, marks: Partial<SessionRow> = {}) => sessionContextValue(row(machineId, s("a", over), marks));
-  assert.deepEqual(sessionMenu(cv("local", {})), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "copySessionId", "deleteSession"]);
-  assert.deepEqual(sessionMenu(cv("local", {}, { unread: true, hidden: true })), ["openSession", "resumeInTerminal", "markRead", "unhideSession", "copySessionId", "deleteSession"]);
-  assert.deepEqual(sessionMenu(cv("local", { status: "running" })), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "copySessionId"]);
-  assert.deepEqual(sessionMenu(cv("hz", { agent: "codex" })), ["markUnread", "hideSession", "copySessionId", "deleteSession"]);
-  assert.deepEqual(sessionMenu(cv("local", { agent: "opencode" })), ["openSession", "markUnread", "hideSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", {})), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", {}, { unread: true, hidden: true, pinned: true })), ["openSession", "resumeInTerminal", "markRead", "unhideSession", "unpinSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", { status: "running" })), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "pinSession", "copySessionId"]);
+  assert.deepEqual(sessionMenu(cv("hz", { agent: "codex" })), ["markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", { agent: "opencode" })), ["openSession", "markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
+});
+
+test("a session row has one inline button: pin, or unpin once pinned", () => {
+  const cv = (over: Partial<SessionInfo>, marks: Partial<SessionRow> = {}) => sessionContextValue(row("local", s("a", over), marks));
+  assert.deepEqual(sessionMenu(cv({}), true), ["pinSession"]);
+  assert.deepEqual(sessionMenu(cv({ status: "running" }), true), ["pinSession"]);
+  assert.deepEqual(sessionMenu(cv({}, { pinned: true }), true), ["unpinSession"]);
+  assert.deepEqual(sessionMenu(cv({ status: "running" }, { pinned: true, hidden: true }), true), ["unpinSession"]);
+  const palette = new Map(manifest.contributes.menus.commandPalette.map((i) => [i.command, i.when ?? ""]));
+  assert.equal(palette.get("agentSessions.pinSession"), "false");
+  assert.equal(palette.get("agentSessions.unpinSession"), "false");
 });
 
 test("workspaceOnly keeps only local rows under workspace folders and leaves remote alone", () => {

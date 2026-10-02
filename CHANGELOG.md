@@ -4,6 +4,9 @@
 
 - The "Add Machine" button in the view header shows a remote-machine icon
   instead of a plus.
+- Sessions can be pinned: the pin button on a session, or "Pin Session" in
+  its context menu, keeps it at the top of its folder and adds a pin to its
+  icon.
 - "New Session…" in a folder's context menu starts a Claude Code or Codex
   session in that folder, opening a window on it when needed.
 - A session whose tab is active in the focused window counts as read: work

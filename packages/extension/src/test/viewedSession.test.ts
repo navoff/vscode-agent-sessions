@@ -9,6 +9,7 @@ const row = (id: string, over: Partial<SessionInfo> = {}, unread = true): Sessio
   session: { agent: "claude", id, title: id, cwd: "/w", createdAt: 1, updatedAt: 100, status: "idle", ...over },
   hidden: false,
   unread,
+  pinned: false,
 });
 const ids = (rows: SessionRow[]) => rows.map((r) => r.session.id);
 

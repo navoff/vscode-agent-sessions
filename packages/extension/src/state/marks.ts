@@ -22,6 +22,14 @@ export class SessionMarks {
     void this.store.update(`hidden/${key}`, hidden ? true : undefined);
   }
 
+  isPinned(key: string): boolean {
+    return this.store.get<boolean>(`pinned/${key}`) === true;
+  }
+
+  setPinned(key: string, pinned: boolean): void {
+    void this.store.update(`pinned/${key}`, pinned ? true : undefined);
+  }
+
   /** A folder hidden as a whole; independent of the hidden marks of its sessions. */
   isProjectHidden(machineId: string, cwd: string): boolean {
     return this.store.get<boolean>(`hiddenProject/${machineId}/${cwd}`) === true;
@@ -43,6 +51,7 @@ export class SessionMarks {
   /** Drops every mark of a session, such as after it was deleted. */
   forget(key: string): void {
     void this.store.update(`hidden/${key}`, undefined);
+    void this.store.update(`pinned/${key}`, undefined);
     void this.store.update(`seen/${key}`, undefined);
   }
 }

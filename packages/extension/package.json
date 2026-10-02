@@ -99,6 +99,18 @@
         "category": "Agent Sessions"
       },
       {
+        "command": "agentSessions.pinSession",
+        "title": "Pin Session",
+        "category": "Agent Sessions",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "agentSessions.unpinSession",
+        "title": "Unpin Session",
+        "category": "Agent Sessions",
+        "icon": "$(pinned)"
+      },
+      {
         "command": "agentSessions.hideProject",
         "title": "Hide Folder",
         "category": "Agent Sessions"
@@ -291,6 +303,26 @@
           "group": "2_marks@4"
         },
         {
+          "command": "agentSessions.pinSession",
+          "when": "view == agentSessions.view && viewItem =~ /^session:.*:unpinned:/",
+          "group": "2_marks@5"
+        },
+        {
+          "command": "agentSessions.unpinSession",
+          "when": "view == agentSessions.view && viewItem =~ /^session:.*:pinned:/",
+          "group": "2_marks@6"
+        },
+        {
+          "command": "agentSessions.pinSession",
+          "when": "view == agentSessions.view && viewItem =~ /^session:.*:unpinned:/",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentSessions.unpinSession",
+          "when": "view == agentSessions.view && viewItem =~ /^session:.*:pinned:/",
+          "group": "inline@1"
+        },
+        {
           "command": "agentSessions.copySessionId",
           "when": "view == agentSessions.view && viewItem =~ /^session:/",
           "group": "3_misc@1"
@@ -393,6 +425,14 @@
         },
         {
           "command": "agentSessions.unhideSession",
+          "when": "false"
+        },
+        {
+          "command": "agentSessions.pinSession",
+          "when": "false"
+        },
+        {
+          "command": "agentSessions.unpinSession",
           "when": "false"
         },
         {

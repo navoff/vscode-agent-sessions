@@ -5,7 +5,7 @@ import type { MachineNode, ProjectNode, SessionNode } from "../tree/treeModel.js
 import { selectionTargets } from "../tree/selection.js";
 
 const s = (id: string): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/w", createdAt: 1, updatedAt: 1, status: "idle" });
-const node = (id: string, machineId = "local"): SessionNode => ({ kind: "session", machineId, row: { machineId, session: s(id), hidden: false, unread: false } });
+const node = (id: string, machineId = "local"): SessionNode => ({ kind: "session", machineId, row: { machineId, session: s(id), hidden: false, unread: false, pinned: false } });
 const project: ProjectNode = { kind: "project", machineId: "local", cwd: "/w", label: "~/w", hidden: false, unread: false, sessions: [] };
 const machine: MachineNode = { kind: "machine", machine: { id: "local", name: "This machine", isLocal: true, state: "connected" }, projects: [] };
 

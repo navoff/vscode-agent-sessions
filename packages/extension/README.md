@@ -30,8 +30,9 @@ agents' own session stores instead and stays out of their way.
 - **Remote machines.** Add any host from `~/.ssh/config`. The extension
   installs a small daemon on the remote machine, brings its own Node when the
   host has none, and streams that machine's sessions into the same tree.
-- **Housekeeping.** Hide sessions you no longer care about, mark them read or
-  unread, delete them for good, and apply all of that to a multi-selection.
+- **Housekeeping.** Pin the sessions you keep coming back to, hide the ones
+  you no longer care about, mark them read or unread, delete them for good,
+  and apply all of that to a multi-selection.
 - **One daemon per machine.** All VS Code windows share one background
   process, so opening a second window does not rescan anything.
 
@@ -66,8 +67,9 @@ agents' own session stores instead and stays out of their way.
 | Start a new session | "New Session…" in a folder's context menu asks for the agent, Claude Code or Codex, and starts a session in that folder: in this window when the folder is open in it, otherwise in a new window on the folder, a Remote-SSH one for a remote machine. |
 | Mark read / unread | Context menu. Opening a session marks it read, and so does having its editor tab active in the focused window: switching to the tab or back to the window clears the mark. A session shown in the Claude Code or Codex sidebar is not detected. |
 | Hide / unhide | "Hide Session" removes a session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. |
+| Pin / unpin | The pin button that appears on a session under the pointer, or "Pin Session" in the context menu, moves the session to the top of its folder and adds a pin to its icon. The same button on a pinned session unpins it. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
-| Several at once | Shift-click and Ctrl-click select several sessions; hide, delete and mark-as-read then apply to the whole selection. |
+| Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |
 | Copy the id | "Copy Session ID". |
 
 ### Filter
