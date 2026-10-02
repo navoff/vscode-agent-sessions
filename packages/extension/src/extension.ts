@@ -18,7 +18,8 @@ import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
 import { SessionMarks } from "./state/marks.js";
 import { SessionStore, type SessionRow } from "./state/sessionStore.js";
-import { codexTabSessionId, pickViewed, tabCandidates, type AgentTab } from "./state/viewedSession.js";
+import { parentPid } from "./state/processParent.js";
+import { codexTabSessionId, pickByElimination, pickViewed, tabCandidates, type AgentTab } from "./state/viewedSession.js";
 import type { MachineInput } from "./tree/treeModel.js";
 import { SessionsTreeProvider } from "./tree/treeProvider.js";
 
@@ -126,20 +127,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     return undefined;
   };
+  const isClaudeTab = (tab: vscode.Tab): boolean => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith(CLAUDE_PANEL_VIEW_TYPE);
+  // Claude Code runs the sessions of this window's tabs as children of the
+  // extension host, the process this extension runs in as well. Their ids
+  // come from Claude Code's own registry, so they hold whatever a tab is called.
+  const ownedClaudeRows = async (rows: readonly SessionRow[]): Promise<SessionRow[]> => {
+    const owned: SessionRow[] = [];
+    for (const r of rows) {
+      if (r.session.agent === "claude" && r.session.live && (await parentPid(r.session.live.pid)) === process.pid) owned.push(r);
+    }
+    return owned;
+  };
+  const viewedClaudeRow = async (tab: AgentTab & { agent: "claude" }, rows: readonly SessionRow[]): Promise<SessionRow | undefined> => {
+    const owned = await ownedClaudeRows(rows);
+    const ownedByLabel = tabCandidates(tab, owned);
+    if (ownedByLabel.length === 1) return ownedByLabel[0];
+    // A tab whose session has no process yet: Claude Code shows only sessions
+    // of the window folder; a session of the same title elsewhere is not it.
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    const candidates: SessionRow[] = [];
+    for (const r of tabCandidates(tab, rows)) if (await claudeFindsSession(r.session.cwd, folders)) candidates.push(r);
+    if (candidates.length > 0) return pickViewed(candidates);
+    // The label matches no title: the session was renamed while its tab was open.
+    const active = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const otherLabels = vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => t !== active && isClaudeTab(t)).map((t) => t.label);
+    return pickByElimination(otherLabels, owned);
+  };
   const markViewedRead = async (): Promise<void> => {
     const tab = activeAgentTab();
     if (!tab) return;
-    let candidates = tabCandidates(tab, store.rows(LOCAL_ID));
-    if (!candidates.some((r) => r.unread)) return;
-    if (tab.agent === "claude") {
-      // Claude Code shows only sessions of the window folder; a session of the
-      // same title elsewhere is not the one in the tab.
-      const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-      const reachable: SessionRow[] = [];
-      for (const r of candidates) if (await claudeFindsSession(r.session.cwd, folders)) reachable.push(r);
-      candidates = reachable;
-    }
-    const viewed = pickViewed(candidates);
+    const rows = store.rows(LOCAL_ID);
+    if (!rows.some((r) => r.unread && r.session.agent === tab.agent)) return;
+    const viewed = tab.agent === "claude" ? await viewedClaudeRow(tab, rows) : pickViewed(tabCandidates(tab, rows));
     if (!viewed?.unread) return;
     store.markRead(LOCAL_ID, viewed.session, Date.now());
     refresh();

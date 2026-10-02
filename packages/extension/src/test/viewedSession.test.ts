@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionInfo } from "@agent-sessions/core";
 import type { SessionRow } from "../state/sessionStore.js";
-import { claudeTabLabel, codexTabSessionId, pickViewed, tabCandidates } from "../state/viewedSession.js";
+import { claudeTabLabel, codexTabSessionId, pickByElimination, pickViewed, tabCandidates } from "../state/viewedSession.js";
+import { parentPidFromStat } from "../state/processParent.js";
 
 const row = (id: string, over: Partial<SessionInfo> = {}, unread = true): SessionRow => ({
   machineId: "local",
@@ -51,4 +52,31 @@ test("one candidate is the viewed session; several are told apart by a live proc
   assert.equal(pickViewed([row("a"), row("b", { live })])?.session.id, "b");
   assert.equal(pickViewed([row("a"), row("b")]), undefined);
   assert.equal(pickViewed([row("a", { live }), row("b", { live })]), undefined);
+});
+
+test("a tab whose label matches no title is paired by elimination among the window's sessions", () => {
+  const renamed = row("a", { title: "выравнивание" });
+  const other = row("b", { title: "переименование сессии" });
+  const third = row("c", { title: "third" });
+  // The only Claude tab of the window shows the only session the window runs.
+  assert.equal(pickByElimination([], [renamed])?.session.id, "a");
+  // Every other tab names its own session, which leaves one.
+  assert.equal(pickByElimination(["переименование сессии"], [renamed, other])?.session.id, "a");
+  assert.equal(pickByElimination(["third", " переименование  сессии "], [renamed, other, third])?.session.id, "a");
+  // Not enough tabs to tell, or none of the window's sessions at all.
+  assert.equal(pickByElimination([], [renamed, other]), undefined);
+  assert.equal(pickByElimination([], []), undefined);
+  // Another tab that names no session, or two tabs that name the same one, leave it open.
+  assert.equal(pickByElimination(["stale too"], [renamed, other]), undefined);
+  assert.equal(pickByElimination(["third", "third"], [renamed, other, third]), undefined);
+  // Two sessions of one label cannot be told apart by a tab.
+  assert.equal(pickByElimination(["third"], [renamed, third, row("d", { title: "third" })]), undefined);
+});
+
+test("the parent pid is the field after the state in /proc/<pid>/stat", () => {
+  assert.equal(parentPidFromStat("185441 (claude) S 183166 3242 3242 1026 3242 4194304 76213"), 183166);
+  // The command may hold spaces and parentheses.
+  assert.equal(parentPidFromStat("77 (a (b) c) R 12 1 1"), 12);
+  assert.equal(parentPidFromStat("garbage"), undefined);
+  assert.equal(parentPidFromStat(""), undefined);
 });

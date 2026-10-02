@@ -14,6 +14,10 @@
   written by the agent itself (the Agent SDK for Claude Code, `codex
   app-server` for Codex), so Claude Code and Codex show it too. The daemon
   protocol is now version 4; a running older daemon is replaced.
+- A Claude Code session renamed while its tab is open is still marked read
+  when the tab is viewed. The tab keeps its old label, so it is no longer
+  matched by title alone: the sessions this window runs are known by their
+  ids, and a tab whose label names none of them is the one left over.
 - "New Session…" in a folder's context menu, or the plus button on the
   folder, starts a Claude Code or Codex session in that folder, opening a
   window on it when needed.
