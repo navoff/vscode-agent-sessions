@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The "Add Machine" button in the view header shows a remote-machine icon
+  instead of a plus.
 - "New Session…" in a folder's context menu starts a Claude Code or Codex
   session in that folder, opening a window on it when needed.
 - A session whose tab is active in the focused window counts as read: work

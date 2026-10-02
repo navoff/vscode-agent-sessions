@@ -158,7 +158,7 @@
         "command": "agentSessions.addMachine",
         "title": "Add Machine",
         "category": "Agent Sessions",
-        "icon": "$(add)"
+        "icon": "$(vm-connect)"
       },
       {
         "command": "agentSessions.renameMachine",
