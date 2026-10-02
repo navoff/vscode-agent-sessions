@@ -169,6 +169,9 @@ test("a session row has one inline button: pin, or unpin once pinned", () => {
   assert.deepEqual(sessionMenu(cv({ status: "running" }), true), ["pinSession"]);
   assert.deepEqual(sessionMenu(cv({}, { pinned: true }), true), ["unpinSession"]);
   assert.deepEqual(sessionMenu(cv({ status: "running" }, { pinned: true, hidden: true }), true), ["unpinSession"]);
+  // A folder row has the New Session button instead.
+  assert.deepEqual(sessionMenu("project:visible:read", true), ["newSession"]);
+  assert.deepEqual(sessionMenu("project:hidden:unread", true), ["newSession"]);
   const palette = new Map(manifest.contributes.menus.commandPalette.map((i) => [i.command, i.when ?? ""]));
   assert.equal(palette.get("agentSessions.pinSession"), "false");
   assert.equal(palette.get("agentSessions.unpinSession"), "false");
