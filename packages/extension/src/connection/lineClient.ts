@@ -17,7 +17,7 @@ export interface LineClientOptions {
   pingIntervalMs?: number;
   pongTimeoutMs?: number;
   helloTimeoutMs?: number;
-  /** How long a request may wait for its answer. Default 45 s, longer than the daemon's 30 s limit on `codex delete`. */
+  /** How long a request may wait for its answer. Default 45 s, longer than the daemon's 30 s limit on a codex command. */
   requestTimeoutMs?: number;
 }
 
@@ -97,6 +97,11 @@ export class LineClient {
     return this.request((requestId) => ({ type: "delete", requestId, agent, id }), "; the deletion may still complete");
   }
 
+  /** Asks the daemon to rename a session with its agent's own mechanism. */
+  renameSession(agent: AgentKind, id: string, title: string): Promise<void> {
+    return this.request((requestId) => ({ type: "rename", requestId, agent, id, title }), "; the rename may still complete");
+  }
+
   /** Asks the daemon to record `session` for a window on its folder to open. */
   pendingOpen(session: SessionInfo): Promise<void> {
     return this.request((requestId) => ({ type: "pendingOpen", requestId, session }), "");
@@ -147,6 +152,9 @@ export class LineClient {
         return;
       case "deleteResult":
         this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "delete failed"));
+        return;
+      case "renameResult":
+        this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "rename failed"));
         return;
       case "pendingOpenResult":
         this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "pending open failed"));

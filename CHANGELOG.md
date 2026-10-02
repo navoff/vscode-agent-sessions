@@ -9,6 +9,11 @@
   icon.
 - A session under the pointer gets a hide button to the left of the pin; on
   a hidden session the same button unhides it.
+- Sessions can be renamed: the pencil button on a session, to the left of
+  the hide button, "Rename Session…" in its context menu, or F2. The name is
+  written by the agent itself (the Agent SDK for Claude Code, `codex
+  app-server` for Codex), so Claude Code and Codex show it too. The daemon
+  protocol is now version 4; a running older daemon is replaced.
 - "New Session…" in a folder's context menu, or the plus button on the
   folder, starts a Claude Code or Codex session in that folder, opening a
   window on it when needed.

@@ -6,7 +6,9 @@ import { basename, join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
 import { fileLockHolder } from "../util/fileLock.js";
 import { isValidSessionId } from "../util/sessionId.js";
+import { normalizeSessionTitle } from "../util/sessionTitle.js";
 import { guardWatcher } from "../util/watch.js";
+import { AppServerExitError, appServerRequest, type AppServerRequest } from "./appServer.js";
 import { listRolloutFiles } from "./discovery.js";
 import { readRolloutInfo, type CodexRolloutInfo } from "./rollout.js";
 import { readSessionIndex } from "./sessionIndex.js";
@@ -37,6 +39,7 @@ export const execFileRunner: CommandRunner = (file, args, opts) =>
   });
 
 const DELETE_TIMEOUT_MS = 30_000;
+const RENAME_TIMEOUT_MS = 30_000;
 
 /** The lines of stderr that start with "Error" if any, else the first 500 characters of the output. */
 function errorText(r: CommandResult): string {
@@ -48,11 +51,14 @@ function errorText(r: CommandResult): string {
 export interface CodexProviderOptions {
   codexDir?: string;
   log?: (msg: string) => void;
-  /** Environment for `codex delete`; CODEX_BIN names the binary. Default process.env. */
+  /** Environment for the codex commands; CODEX_BIN names the binary. Default process.env. */
   env?: NodeJS.ProcessEnv;
   /** Replaces execFile; for tests. */
   runCommand?: CommandRunner;
   deleteTimeoutMs?: number;
+  /** Replaces the request to `codex app-server`; for tests. */
+  appServer?: AppServerRequest;
+  renameTimeoutMs?: number;
   /** Where to read kernel file locks from; for tests. Default /proc/locks. */
   procLocksPath?: string;
 }
@@ -71,6 +77,8 @@ export class CodexProvider implements SessionProvider {
   private readonly env: NodeJS.ProcessEnv;
   private readonly runCommand: CommandRunner;
   private readonly deleteTimeoutMs: number;
+  private readonly appServer: AppServerRequest;
+  private readonly renameTimeoutMs: number;
   private readonly procLocksPath: string | undefined;
 
   constructor(opts: CodexProviderOptions = {}) {
@@ -79,6 +87,8 @@ export class CodexProvider implements SessionProvider {
     this.env = opts.env ?? process.env;
     this.runCommand = opts.runCommand ?? execFileRunner;
     this.deleteTimeoutMs = opts.deleteTimeoutMs ?? DELETE_TIMEOUT_MS;
+    this.appServer = opts.appServer ?? appServerRequest;
+    this.renameTimeoutMs = opts.renameTimeoutMs ?? RENAME_TIMEOUT_MS;
     this.procLocksPath = opts.procLocksPath;
   }
 
@@ -130,11 +140,32 @@ export class CodexProvider implements SessionProvider {
   }
 
   /**
+   * Runs `attempt` on the codex binary: CODEX_BIN, else `codex` on PATH, else
+   * `codex` found by a login shell, started as `bash shellArgs`: a remote
+   * daemon runs under a non-login ssh session whose PATH may lack
+   * ~/.local/bin. `attempt` rejects with code "ENOENT" when its file cannot
+   * be started; any other outcome is final.
+   */
+  private async withCodex<T>(args: string[], shellArgs: string[], attempt: (file: string, args: string[], viaShell: boolean) => Promise<T>): Promise<T> {
+    const bin = this.env.CODEX_BIN;
+    try {
+      return await attempt(bin || "codex", args, false);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      if (bin) throw new Error(`CODEX_BIN ${bin} not found`);
+      this.log("codex: codex not on PATH, trying a login shell");
+      try {
+        return await attempt("bash", shellArgs, true);
+      } catch (err2) {
+        if ((err2 as NodeJS.ErrnoException).code !== "ENOENT") throw err2;
+        throw new Error(`codex not found on PATH and no bash to look further: ${String(err2)}`);
+      }
+    }
+  }
+
+  /**
    * Deletes the session with `codex delete`, which also keeps Codex's own
    * index and state consistent; rollout files are never removed by hand.
-   * The binary is CODEX_BIN, else `codex` on PATH, else `codex` found by a
-   * login shell: a remote daemon runs under a non-login ssh session whose
-   * PATH may lack ~/.local/bin.
    */
   async delete(id: string): Promise<void> {
     if (!isValidSessionId(id)) throw new Error(`invalid Codex session id ${JSON.stringify(id.slice(0, 80))}`);
@@ -147,31 +178,53 @@ export class CodexProvider implements SessionProvider {
         `the session is open in Codex (process ${holder}). Close it in Codex, or reload the VS Code window that has it open, then try again`,
       );
     }
-    // --force skips the interactive confirmation; the user confirmed in VS Code.
-    const args = ["delete", "--force", "--", id];
     const opts = { env: { ...this.env, CODEX_HOME: this.codexDir }, timeoutMs: this.deleteTimeoutMs };
-    const bin = this.env.CODEX_BIN;
-    let result: CommandResult;
-    try {
-      result = await this.runCommand(bin || "codex", args, opts);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") throw new Error(`cannot run codex: ${String(err)}`);
-      if (bin) throw new Error(`CODEX_BIN ${bin} not found`);
-      this.log("codex: codex not on PATH, trying a login shell");
-      try {
-        result = await this.runCommand("bash", ["-lc", 'CODEX_HOME="$2" exec codex delete --force -- "$1"', "_", id, this.codexDir], opts);
-      } catch (err2) {
-        throw new Error(`codex not found on PATH and no bash to look further: ${String(err2)}`);
-      }
-      if (result.code === 127) throw new Error("codex not found on PATH or in a login shell; set CODEX_BIN");
-    }
+    const result = await this.withCodex(
+      // --force skips the interactive confirmation; the user confirmed in VS Code.
+      ["delete", "--force", "--", id],
+      ["-lc", 'CODEX_HOME="$2" exec codex delete --force -- "$1"', "_", id, this.codexDir],
+      async (file, args, viaShell) => {
+        let r: CommandResult;
+        try {
+          r = await this.runCommand(file, args, opts);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+          throw new Error(`cannot run codex: ${String(err)}`);
+        }
+        if (viaShell && r.code === 127) throw new Error("codex not found on PATH or in a login shell; set CODEX_BIN");
+        return r;
+      },
+    );
     if (result.code !== 0) {
       const what = result.code === null ? `timed out after ${Math.round(this.deleteTimeoutMs / 1000)} s` : `exit ${result.code}`;
       const text = errorText(result);
       throw new Error(`codex delete failed (${what})${text ? `: ${text}` : ""}`);
     }
     this.log(`codex: deleted session ${id}`);
+  }
+
+  /**
+   * Renames the session with `thread/name/set` of a `codex app-server`
+   * started for this one request, so Codex writes its own session index. A
+   * running thread, or one open in another Codex process, is renamed too:
+   * the name goes to the index and the rollout is left alone. A window that
+   * has the thread open may show the old name until it is reloaded.
+   */
+  async rename(id: string, title: string): Promise<void> {
+    if (!isValidSessionId(id)) throw new Error(`invalid Codex session id ${JSON.stringify(id.slice(0, 80))}`);
+    const params = { threadId: id, name: normalizeSessionTitle(title) };
+    const opts = { env: { ...this.env, CODEX_HOME: this.codexDir }, timeoutMs: this.renameTimeoutMs };
+    await this.withCodex(["app-server"], ["-lc", 'CODEX_HOME="$1" exec codex app-server', "_", this.codexDir], async (file, args, viaShell) => {
+      try {
+        await this.appServer(file, args, "thread/name/set", params, opts);
+      } catch (err) {
+        if (!(err instanceof AppServerExitError)) throw err;
+        if (viaShell && err.exitCode === 127) throw new Error("codex not found on PATH or in a login shell; set CODEX_BIN");
+        const text = errorText({ code: err.exitCode, stdout: "", stderr: err.stderr });
+        throw new Error(`${err.message}${text ? `: ${text}` : ""}`);
+      }
+    });
+    this.log(`codex: renamed session ${id}`);
   }
 
   /**

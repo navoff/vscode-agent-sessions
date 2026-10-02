@@ -115,6 +115,12 @@ export class MachineConnection {
     return this.client.deleteSession(agent, id);
   }
 
+  /** Renames a session through the connected daemon; see LineClient.renameSession. */
+  renameSession(agent: AgentKind, id: string, title: string): Promise<void> {
+    if (!this.client || this.state !== "connected") return Promise.reject(new Error("the machine is not connected"));
+    return this.client.renameSession(agent, id, title);
+  }
+
   /** Records a pending open through the connected daemon; see LineClient.pendingOpen. */
   pendingOpen(session: SessionInfo): Promise<void> {
     if (!this.client || this.state !== "connected") return Promise.reject(new Error("the machine is not connected"));

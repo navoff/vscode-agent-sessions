@@ -31,4 +31,6 @@ export interface SessionProvider {
   watch(onChange: () => void): Disposable;
   /** Permanently deletes a session with the agent's own mechanism; rejects with a readable error. */
   delete?(id: string): Promise<void>;
+  /** Renames a session with the agent's own mechanism; rejects with a readable error. */
+  rename?(id: string, title: string): Promise<void>;
 }

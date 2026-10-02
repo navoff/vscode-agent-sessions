@@ -123,7 +123,7 @@ test("sessionContextValue names place, agent, marks and status", () => {
 interface MenuItem { command: string; when?: string; group?: string }
 // package.json sits next to out/, two levels above this compiled test.
 const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
-  contributes: { commands: Array<{ command: string; enablement?: string }>; menus: { "view/item/context": MenuItem[]; "view/title": MenuItem[]; commandPalette: MenuItem[] } };
+  contributes: { commands: Array<{ command: string; enablement?: string }>; keybindings: Array<{ command: string; key: string; when?: string }>; menus: { "view/item/context": MenuItem[]; "view/title": MenuItem[]; commandPalette: MenuItem[] } };
 };
 
 test("header toggles with two icons use complementary when clauses", () => {
@@ -158,27 +158,33 @@ function sessionMenu(contextValue: string, inline = false): string[] {
 
 test("session menu entries in package.json follow the contextValue", () => {
   const cv = (machineId: string, over: Partial<SessionInfo>, marks: Partial<SessionRow> = {}) => sessionContextValue(row(machineId, s("a", over), marks));
-  assert.deepEqual(sessionMenu(cv("local", {})), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
-  assert.deepEqual(sessionMenu(cv("local", {}, { unread: true, hidden: true, pinned: true })), ["openSession", "resumeInTerminal", "markRead", "unhideSession", "unpinSession", "copySessionId", "deleteSession"]);
-  assert.deepEqual(sessionMenu(cv("local", { status: "running" })), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "pinSession", "copySessionId"]);
-  assert.deepEqual(sessionMenu(cv("hz", { agent: "codex" })), ["markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", {})), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "pinSession", "copySessionId", "renameSession", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", {}, { unread: true, hidden: true, pinned: true })), ["openSession", "resumeInTerminal", "markRead", "unhideSession", "unpinSession", "copySessionId", "renameSession", "deleteSession"]);
+  assert.deepEqual(sessionMenu(cv("local", { status: "running" })), ["openSession", "resumeInTerminal", "markUnread", "hideSession", "pinSession", "copySessionId", "renameSession"]);
+  assert.deepEqual(sessionMenu(cv("hz", { agent: "codex" })), ["markUnread", "hideSession", "pinSession", "copySessionId", "renameSession", "deleteSession"]);
+  // Only Claude Code and Codex sessions can be renamed.
   assert.deepEqual(sessionMenu(cv("local", { agent: "opencode" })), ["openSession", "markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
 });
 
-test("a session row has two inline buttons: hide or unhide, then pin or unpin", () => {
+test("a session row has three inline buttons: rename, hide or unhide, then pin or unpin", () => {
   const cv = (over: Partial<SessionInfo>, marks: Partial<SessionRow> = {}) => sessionContextValue(row("local", s("a", over), marks));
-  assert.deepEqual(sessionMenu(cv({}), true), ["hideSession", "pinSession"]);
-  assert.deepEqual(sessionMenu(cv({ status: "running" }), true), ["hideSession", "pinSession"]);
-  assert.deepEqual(sessionMenu(cv({}, { pinned: true }), true), ["hideSession", "unpinSession"]);
-  assert.deepEqual(sessionMenu(cv({}, { hidden: true }), true), ["unhideSession", "pinSession"]);
-  assert.deepEqual(sessionMenu(cv({ status: "running" }, { pinned: true, hidden: true }), true), ["unhideSession", "unpinSession"]);
-  assert.deepEqual(sessionMenu(sessionContextValue(row("hz", s("a", { agent: "codex" }))), true), ["hideSession", "pinSession"]);
+  assert.deepEqual(sessionMenu(cv({}), true), ["renameSession", "hideSession", "pinSession"]);
+  assert.deepEqual(sessionMenu(cv({ status: "running" }), true), ["renameSession", "hideSession", "pinSession"]);
+  assert.deepEqual(sessionMenu(cv({}, { pinned: true }), true), ["renameSession", "hideSession", "unpinSession"]);
+  assert.deepEqual(sessionMenu(cv({}, { hidden: true }), true), ["renameSession", "unhideSession", "pinSession"]);
+  assert.deepEqual(sessionMenu(cv({ status: "running" }, { pinned: true, hidden: true }), true), ["renameSession", "unhideSession", "unpinSession"]);
+  assert.deepEqual(sessionMenu(sessionContextValue(row("hz", s("a", { agent: "codex" }))), true), ["renameSession", "hideSession", "pinSession"]);
+  // A session of an agent that cannot be renamed keeps two.
+  assert.deepEqual(sessionMenu(cv({ agent: "opencode" }), true), ["hideSession", "pinSession"]);
   // A folder row has the New Session button instead.
   assert.deepEqual(sessionMenu("project:visible:read", true), ["newSession"]);
   assert.deepEqual(sessionMenu("project:hidden:unread", true), ["newSession"]);
   const palette = new Map(manifest.contributes.menus.commandPalette.map((i) => [i.command, i.when ?? ""]));
   assert.equal(palette.get("agentSessions.pinSession"), "false");
   assert.equal(palette.get("agentSessions.unpinSession"), "false");
+  assert.equal(palette.get("agentSessions.renameSession"), "false");
+  const f2 = manifest.contributes.keybindings.find((k) => k.command === "agentSessions.renameSession");
+  assert.deepEqual([f2?.key, f2?.when], ["f2", "focusedView == agentSessions.view && !inputFocus"]);
 });
 
 test("workspaceOnly keeps only local rows under workspace folders and leaves remote alone", () => {

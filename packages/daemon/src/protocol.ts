@@ -1,7 +1,7 @@
 import type { AgentKind, SessionInfo } from "@agent-sessions/core";
 
-/** 2 added "delete" and "deleteResult"; 3 added "pendingOpen" and "pendingOpenResult". */
-export const PROTOCOL_VERSION = 3;
+/** 2 added "delete" and "deleteResult"; 3 added "pendingOpen" and "pendingOpenResult"; 4 added "rename" and "renameResult". */
+export const PROTOCOL_VERSION = 4;
 
 export type ClientMessage =
   | { type: "hello"; protocol: number }
@@ -10,6 +10,8 @@ export type ClientMessage =
   | { type: "shutdown" }
   /** Permanently deletes a session; answered by "deleteResult" with the same requestId. */
   | { type: "delete"; requestId: string; agent: string; id: string }
+  /** Renames a session; answered by "renameResult" with the same requestId. */
+  | { type: "rename"; requestId: string; agent: string; id: string; title: string }
   /** Records a session for a window on its folder to open; answered by "pendingOpenResult". */
   | { type: "pendingOpen"; requestId: string; session: SessionInfo };
 
@@ -26,6 +28,7 @@ export type DaemonMessage =
   | { type: "changed"; upserted: SessionInfo[]; removed: string[] }
   | { type: "pong" }
   | { type: "deleteResult"; requestId: string; ok: boolean; error?: string }
+  | { type: "renameResult"; requestId: string; ok: boolean; error?: string }
   | { type: "pendingOpenResult"; requestId: string; ok: boolean; error?: string }
   | { type: "error"; message: string };
 
@@ -50,6 +53,10 @@ export function parseClientMessage(line: string): ClientMessage | undefined {
     case "delete":
       return typeof r.requestId === "string" && typeof r.agent === "string" && typeof r.id === "string"
         ? { type: "delete", requestId: r.requestId, agent: r.agent, id: r.id }
+        : undefined;
+    case "rename":
+      return typeof r.requestId === "string" && typeof r.agent === "string" && typeof r.id === "string" && typeof r.title === "string"
+        ? { type: "rename", requestId: r.requestId, agent: r.agent, id: r.id, title: r.title }
         : undefined;
     case "pendingOpen":
       return typeof r.requestId === "string" && isSessionInfo(r.session)
@@ -101,6 +108,12 @@ export function parseDaemonMessage(line: string): DaemonMessage | undefined {
     case "deleteResult": {
       if (typeof r.requestId !== "string" || typeof r.ok !== "boolean") return undefined;
       const msg: DaemonMessage = { type: "deleteResult", requestId: r.requestId, ok: r.ok };
+      if (typeof r.error === "string") msg.error = r.error;
+      return msg;
+    }
+    case "renameResult": {
+      if (typeof r.requestId !== "string" || typeof r.ok !== "boolean") return undefined;
+      const msg: DaemonMessage = { type: "renameResult", requestId: r.requestId, ok: r.ok };
       if (typeof r.error === "string") msg.error = r.error;
       return msg;
     }

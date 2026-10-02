@@ -234,3 +234,19 @@ test("a protocol mismatch stops reconnecting only when told to", async () => {
     conn.dispose();
   }
 });
+
+test("renameSession goes through the connected daemon and fails when not connected", async () => {
+  const h = harness();
+  await assert.rejects(h.conn.renameSession("codex", "u1", "New name"), /not connected/);
+  h.conn.connect();
+  await tick(5);
+  h.procs[0].stdout.write(hello);
+  await tick(5);
+  const done = h.conn.renameSession("codex", "u1", "New name");
+  await tick(5);
+  const req = JSON.parse(h.procs[0].received.find((l) => l.includes('"rename"'))!);
+  assert.deepEqual([req.agent, req.id, req.title], ["codex", "u1", "New name"]);
+  h.procs[0].stdout.write(JSON.stringify({ type: "renameResult", requestId: req.requestId, ok: true }) + "\n");
+  await done;
+  h.conn.dispose();
+});

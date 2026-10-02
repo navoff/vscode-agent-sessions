@@ -15,12 +15,19 @@ class FakeProvider implements SessionProvider {
   snapshotCalls = 0;
   deleted: string[] = [];
   deleteError: Error | undefined;
+  renamed: Array<[string, string]> = [];
+  renameError: Error | undefined;
   private cb: (() => void) | undefined;
   constructor(readonly agent: "claude" | "codex") {}
   async delete(id: string): Promise<void> {
     if (this.deleteError) throw this.deleteError;
     this.deleted.push(id);
     this.sessions = this.sessions.filter((x) => x.id !== id);
+  }
+  async rename(id: string, title: string): Promise<void> {
+    if (this.renameError) throw this.renameError;
+    this.renamed.push([id, title]);
+    this.sessions = this.sessions.map((x) => (x.id === id ? { ...x, title } : x));
   }
   async snapshot(): Promise<SessionInfo[]> {
     this.snapshotCalls++;
@@ -67,6 +74,17 @@ test("parseClientMessage accepts shutdown", () => {
   assert.deepEqual(parseClientMessage('{"type":"shutdown"}'), { type: "shutdown" });
   assert.deepEqual(parseClientMessage('{"type":"ping"}'), { type: "ping" });
   assert.equal(parseClientMessage('{"type":"nope"}'), undefined);
+});
+
+test("parse rename and renameResult messages", () => {
+  assert.deepEqual(parseClientMessage('{"type":"rename","requestId":"7","agent":"codex","id":"u1","title":"New name"}'), { type: "rename", requestId: "7", agent: "codex", id: "u1", title: "New name" });
+  assert.equal(parseClientMessage('{"type":"rename","requestId":"7","agent":"codex","id":"u1"}'), undefined);
+  assert.equal(parseClientMessage('{"type":"rename","requestId":"7","agent":"codex","id":"u1","title":5}'), undefined);
+  assert.equal(parseClientMessage('{"type":"rename","agent":"codex","id":"u1","title":"x"}'), undefined);
+  assert.deepEqual(parseDaemonMessage('{"type":"renameResult","requestId":"7","ok":true}'), { type: "renameResult", requestId: "7", ok: true });
+  assert.deepEqual(parseDaemonMessage('{"type":"renameResult","requestId":"7","ok":false,"error":"no"}'), { type: "renameResult", requestId: "7", ok: false, error: "no" });
+  assert.equal(parseDaemonMessage('{"type":"renameResult","requestId":"7"}'), undefined);
+  assert.equal(parseDaemonMessage('{"type":"renameResult","ok":true}'), undefined);
 });
 
 test("parse delete and deleteResult messages", () => {
@@ -429,5 +447,69 @@ test("a delete finishing after the requester detached sends it nothing", async (
   await tick(30);
   assert.equal(a.sent.length, aBefore);
   assert.ok(b.sent.some((m) => m.type === "changed"));
+  h.daemon.stop();
+});
+
+test("rename answers only the requester, then every synced client gets the new title", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1"), s("codex", "u2")];
+  const { a, b } = await syncedPair(h);
+  const aBefore = a.sent.length;
+  const bBefore = b.sent.length;
+  a.client.handle({ type: "rename", requestId: "r1", agent: "codex", id: "u1", title: "New name" });
+  await tick(30);
+  assert.deepEqual(h.codex.renamed, [["u1", "New name"]]);
+  const aNew = a.sent.slice(aBefore);
+  const bNew = b.sent.slice(bBefore);
+  assert.deepEqual(aNew[0], { type: "renameResult", requestId: "r1", ok: true });
+  assert.ok(!bNew.some((m) => m.type === "renameResult"));
+  for (const msgs of [aNew, bNew]) {
+    const changed = msgs.filter((m) => m.type === "changed");
+    assert.deepEqual(changed, [{ type: "changed", upserted: [s("codex", "u1", { title: "New name" })], removed: [] }]);
+  }
+  h.daemon.stop();
+});
+
+test("a failed rename answers ok:false with the error and does not refresh", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1")];
+  const { a, b } = await syncedPair(h);
+  h.codex.renameError = new Error("no rollout found for thread id u1");
+  const calls = h.codex.snapshotCalls;
+  const aBefore = a.sent.length;
+  const bBefore = b.sent.length;
+  a.client.handle({ type: "rename", requestId: "r2", agent: "codex", id: "u1", title: "New name" });
+  await tick(30);
+  assert.deepEqual(a.sent.slice(aBefore), [{ type: "renameResult", requestId: "r2", ok: false, error: "no rollout found for thread id u1" }]);
+  assert.equal(b.sent.length, bBefore);
+  assert.equal(h.codex.snapshotCalls, calls);
+  h.daemon.stop();
+});
+
+test("rename for an unknown agent or a provider without rename answers ok:false", async () => {
+  const plain: SessionProvider = { agent: "claude", snapshot: async () => [], watch: () => ({ dispose: () => {} }) };
+  const daemon = new Daemon({ providers: [plain], version: "t", home: "/h", debounceMs: 10, pollMs: 60_000 });
+  const sent: DaemonMessage[] = [];
+  const c = daemon.attach((m) => sent.push(m));
+  c.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  sent.length = 0;
+  c.handle({ type: "rename", requestId: "1", agent: "opencode", id: "x", title: "t" });
+  c.handle({ type: "rename", requestId: "2", agent: "claude", id: "x", title: "t" });
+  await tick(10);
+  assert.deepEqual(sent, [
+    { type: "renameResult", requestId: "1", ok: false, error: 'unknown agent "opencode"' },
+    { type: "renameResult", requestId: "2", ok: false, error: "renaming claude sessions is not supported" },
+  ]);
+  daemon.stop();
+});
+
+test("rename before a completed hello answers handshake required and renames nothing", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1")];
+  const fresh = h.attach();
+  fresh.client.handle({ type: "rename", requestId: "r0", agent: "codex", id: "u1", title: "New name" });
+  await tick(30);
+  assert.deepEqual(fresh.sent, [{ type: "renameResult", requestId: "r0", ok: false, error: "handshake required" }]);
+  assert.deepEqual(h.codex.renamed, []);
   h.daemon.stop();
 });

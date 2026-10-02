@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSessionIndex } from "../codex/sessionIndex.js";
 import { listRolloutFiles } from "../codex/discovery.js";
+import { AppServerExitError, type AppServerRequest } from "../codex/appServer.js";
 import { CodexProvider, type CommandResult, type CommandRunner } from "../codex/provider.js";
 
 const meta = (payload: Record<string, unknown>) => JSON.stringify({ type: "session_meta", payload });
@@ -230,4 +231,89 @@ test("snapshot uses the last activity time instead of the file mtime", async () 
   const p = new CodexProvider({ codexDir: dir });
   const old = (await p.snapshot()).find((s) => s.id === "old1");
   assert.equal(old?.updatedAt, Date.parse("2026-09-08T14:59:40.000Z"));
+});
+
+interface ServerCall { file: string; args: string[]; method: string; params: unknown; env: NodeJS.ProcessEnv; timeoutMs: number }
+function serverRecorder(results: Array<Error | undefined>) {
+  const calls: ServerCall[] = [];
+  const request: AppServerRequest = async (file, args, method, params, opts) => {
+    calls.push({ file, args, method, params, env: opts.env, timeoutMs: opts.timeoutMs });
+    const r = results.shift();
+    if (r) throw r;
+    return {};
+  };
+  return { calls, request };
+}
+
+test("rename sends thread/name/set to codex app-server with CODEX_HOME and a 30 s timeout", async () => {
+  const { dir } = await makeDeleteDir();
+  const s = serverRecorder([]);
+  const p = new CodexProvider({ codexDir: dir, env: { PATH: "/bin" }, appServer: s.request });
+  await p.rename(CID, "  New name ");
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].file, "codex");
+  assert.deepEqual(s.calls[0].args, ["app-server"]);
+  assert.equal(s.calls[0].method, "thread/name/set");
+  assert.deepEqual(s.calls[0].params, { threadId: CID, name: "New name" });
+  assert.equal(s.calls[0].env.CODEX_HOME, dir);
+  assert.equal(s.calls[0].env.PATH, "/bin");
+  assert.equal(s.calls[0].timeoutMs, 30_000);
+});
+
+test("rename works on a running thread and on one whose writer lock is held", async () => {
+  const { dir } = await makeDeleteDir("task_started");
+  const lockDir = join(dir, "thread-writer-locks");
+  await mkdir(lockDir, { recursive: true });
+  const lock = join(lockDir, `${CID}.lock`);
+  await writeFile(lock, "");
+  const st = await stat(lock);
+  const major = (Math.floor(st.dev / 256) & 0xfff).toString(16);
+  const minor = ((st.dev & 0xff) | (Math.floor(st.dev / 4096) & 0xfff00)).toString(16);
+  const locks = join(dir, "proc-locks");
+  await writeFile(locks, `224: FLOCK  ADVISORY  WRITE 601322 ${major}:${minor}:${st.ino} 0 EOF\n`);
+  const s = serverRecorder([]);
+  const p = new CodexProvider({ codexDir: dir, appServer: s.request, procLocksPath: locks });
+  assert.equal((await p.snapshot())[0].status, "running");
+  await p.rename(CID, "New name");
+  assert.equal(s.calls.length, 1);
+});
+
+test("rename uses CODEX_BIN when set and does not fall back", async () => {
+  const { dir } = await makeDeleteDir();
+  const ok = serverRecorder([]);
+  await new CodexProvider({ codexDir: dir, env: { CODEX_BIN: "/opt/codex" }, appServer: ok.request }).rename(CID, "New name");
+  assert.equal(ok.calls[0].file, "/opt/codex");
+  const missing = serverRecorder([enoent()]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, env: { CODEX_BIN: "/opt/codex" }, appServer: missing.request }).rename(CID, "New name"), /CODEX_BIN \/opt\/codex not found/);
+  assert.equal(missing.calls.length, 1);
+});
+
+test("rename retries through a login shell that keeps CODEX_HOME when codex is not on PATH", async () => {
+  const { dir } = await makeDeleteDir();
+  const s = serverRecorder([enoent()]);
+  await new CodexProvider({ codexDir: dir, env: {}, appServer: s.request }).rename(CID, "New name");
+  assert.equal(s.calls.length, 2);
+  assert.equal(s.calls[1].file, "bash");
+  assert.deepEqual(s.calls[1].args, ["-lc", 'CODEX_HOME="$1" exec codex app-server', "_", dir]);
+  assert.deepEqual(s.calls[1].params, { threadId: CID, name: "New name" });
+  const notFound = serverRecorder([enoent(), new AppServerExitError(127, "bash: codex: command not found")]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, env: {}, appServer: notFound.request }).rename(CID, "New name"), /not found on PATH or in a login shell/);
+});
+
+test("rename passes the server's error through and reports an early exit with its stderr", async () => {
+  const { dir } = await makeDeleteDir();
+  const refused = serverRecorder([new Error(`no rollout found for thread id ${CID}`)]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, appServer: refused.request }).rename(CID, "New name"), /^Error: no rollout found for thread id/);
+  const died = serverRecorder([new AppServerExitError(1, "WARNING: something\nError: unknown subcommand app-server\n")]);
+  await assert.rejects(new CodexProvider({ codexDir: dir, appServer: died.request }).rename(CID, "New name"), /codex app-server exited \(exit 1\) before answering: Error: unknown subcommand app-server$/);
+});
+
+test("rename refuses a non-UUID id and a bad title without starting anything", async () => {
+  const { dir } = await makeDeleteDir();
+  const s = serverRecorder([]);
+  const p = new CodexProvider({ codexDir: dir, appServer: s.request });
+  for (const bad of ["u1", "u1; rm -rf ~", "--help", `${CID}0`]) await assert.rejects(p.rename(bad, "New name"), /invalid Codex session id/, bad);
+  await assert.rejects(p.rename(CID, " "), /session title is empty/);
+  await assert.rejects(p.rename(CID, "a\nb"), /single line/);
+  assert.equal(s.calls.length, 0);
 });

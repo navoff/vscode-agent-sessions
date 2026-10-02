@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { isValidSessionId, type AgentKind, type SessionInfo } from "@agent-sessions/core";
+import { isValidSessionId, sessionTitleProblem, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
 import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState } from "./tree/filterPicker.js";
 import type { ProjectNode, SessionNode, TreeNode } from "./tree/treeModel.js";
@@ -16,6 +16,8 @@ export interface CommandDeps {
   setFilter(f: FilterState): void;
   /** Deletes a session through the daemon of its machine. */
   deleteSession(machineId: string, agent: AgentKind, id: string): Promise<void>;
+  /** Renames a session through the daemon of its machine. */
+  renameSession(machineId: string, agent: AgentKind, id: string, title: string): Promise<void>;
   /** Current tree selection, for commands run from a keybinding. */
   selection(): readonly TreeNode[];
   /** Records a session on its machine for a window on its folder to open. */
@@ -292,6 +294,45 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     const s = sessionOf(node);
     if (!s || s.machineId !== "local" || !checkSessionId(s.session.id)) return;
     resumeInTerminal(s.session);
+  });
+  // One session at a time: the one the command was run on, or for the
+  // keybinding, which passes nothing, the only selected one.
+  reg("agentSessions.renameSession", async (node) => {
+    const selected = deps.selection();
+    const s = sessionOf(node ?? (selected.length === 1 ? selected[0] : undefined));
+    if (!s) return;
+    const { machineId, session } = s;
+    if (session.agent !== "claude" && session.agent !== "codex") {
+      void vscode.window.showInformationMessage(`Renaming ${session.agent} sessions is not supported.`);
+      return;
+    }
+    // The daemon only renames UUID ids; say so here instead of after the round trip.
+    if (!isValidSessionId(session.id)) {
+      void vscode.window.showErrorMessage(`"${session.title}" cannot be renamed: its id is not a session UUID.`);
+      return;
+    }
+    const typed = await vscode.window.showInputBox({
+      title: "Rename Session",
+      prompt: `The new name is written by ${session.agent === "claude" ? "Claude Code" : "Codex"} itself, so it shows there as well.`,
+      value: session.title,
+      validateInput: (value) => {
+        const problem = sessionTitleProblem(value.trim());
+        return problem ? problem[0].toUpperCase() + problem.slice(1) : undefined;
+      },
+    });
+    if (typed === undefined) return;
+    const title = typed.trim();
+    if (title === session.title) return;
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Renaming "${session.title}"` }, () =>
+        deps.renameSession(machineId, session.agent, session.id, title),
+      );
+      deps.log.appendLine(`[${machineId}] renamed ${session.agent}:${session.id}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      deps.log.appendLine(`[${machineId}] rename ${session.agent}:${session.id} failed: ${msg}`);
+      void vscode.window.showErrorMessage(`Could not rename "${session.title}": ${msg}`);
+    }
   });
   regMulti("agentSessions.deleteSession", async (targets) => {
     const skipped: string[] = [];

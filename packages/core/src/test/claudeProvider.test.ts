@@ -204,3 +204,61 @@ test("delete rejects a non-UUID id and passes SDK errors through", async () => {
   const failing = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, deleteSession: async () => { throw new Error(`Session ${ID2} not found`); } });
   await assert.rejects(failing.delete(ID2), /not found/);
 });
+
+type RenCall = [string, string, { dir?: string } | undefined];
+
+test("rename calls the SDK with the trimmed title and the session's cwd as dir", async () => {
+  const claudeDir = await makeDeleteDir();
+  const calls: RenCall[] = [];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, renameSession: async (id, title, o) => { calls.push([id, title, o]); } });
+  await p.rename(ID1, "  New name ");
+  assert.deepEqual(calls, [[ID1, "New name", undefined]]);
+  await p.snapshot();
+  await p.rename(ID1, "Other");
+  assert.deepEqual(calls[1], [ID1, "Other", { dir: "/w" }]);
+});
+
+test("rename retries without dir when the transcript is not under the cwd's project", async () => {
+  const claudeDir = await makeDeleteDir();
+  const calls: RenCall[] = [];
+  const p = new ClaudeProvider({
+    claudeDir, listSessions: async () => sdkDel,
+    renameSession: async (id, title, o) => { calls.push([id, title, o]); if (o?.dir) throw new Error(`Session ${id} not found in project directory for ${o.dir}`); },
+  });
+  await p.snapshot();
+  await p.rename(ID1, "New name");
+  assert.deepEqual(calls, [[ID1, "New name", { dir: "/w" }], [ID1, "New name", undefined]]);
+});
+
+test("rename works on a session with a live Claude Code process", async () => {
+  for (const live of ["busy", "idle"] as const) {
+    const claudeDir = await makeDeleteDir(live);
+    const calls: RenCall[] = [];
+    const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, isAlive: () => true, renameSession: async (id, title, o) => { calls.push([id, title, o]); } });
+    await p.rename(ID1, "New name");
+    assert.equal(calls.length, 1, live);
+  }
+});
+
+test("rename refuses an id whose transcript exists in several project folders", async () => {
+  const claudeDir = await makeDeleteDir();
+  await mkdir(join(claudeDir, "projects", "-other"));
+  await writeFile(join(claudeDir, "projects", "-other", `${ID1}.jsonl`), "{}\n");
+  const calls: RenCall[] = [];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, renameSession: async (id, title, o) => { calls.push([id, title, o]); } });
+  await assert.rejects(p.rename(ID1, "New name"), /transcripts in 2 project folders \(-other, -w\); not renaming any of them/);
+  assert.equal(calls.length, 0);
+});
+
+test("rename rejects a non-UUID id and a bad title, and passes SDK errors through", async () => {
+  const claudeDir = await makeDeleteDir();
+  const calls: RenCall[] = [];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, renameSession: async (id, title, o) => { calls.push([id, title, o]); } });
+  for (const bad of ["../x", "-rf", "b", `${ID1}x`, ""]) await assert.rejects(p.rename(bad, "New name"), /invalid Claude session id/, bad);
+  await assert.rejects(p.rename(ID1, "  "), /session title is empty/);
+  await assert.rejects(p.rename(ID1, "a\nb"), /single line/);
+  await assert.rejects(p.rename(ID1, "x".repeat(201)), /longer than 200 characters/);
+  assert.equal(calls.length, 0);
+  const failing = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, renameSession: async () => { throw new Error(`Session ${ID2} not found`); } });
+  await assert.rejects(failing.rename(ID2, "New name"), /not found/);
+});

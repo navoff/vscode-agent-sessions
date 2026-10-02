@@ -135,6 +135,13 @@ export class Daemon {
         }
         void this.deleteSession(client, msg);
         return;
+      case "rename":
+        if (!client.greeted) {
+          this.safeSend(client, { type: "renameResult", requestId: msg.requestId, ok: false, error: "handshake required" });
+          return;
+        }
+        void this.renameSession(client, msg);
+        return;
       case "pendingOpen":
         if (!client.greeted) {
           this.safeSend(client, { type: "pendingOpenResult", requestId: msg.requestId, ok: false, error: "handshake required" });
@@ -182,6 +189,31 @@ export class Daemon {
     }
     if (this.stopped) return;
     this.safeSend(client, error === undefined ? { type: "deleteResult", requestId: msg.requestId, ok: true } : { type: "deleteResult", requestId: msg.requestId, ok: false, error });
+    if (error === undefined) void this.refresh(undefined);
+  }
+
+  /**
+   * Renames a session through its provider and answers only the requester.
+   * On success a refresh sends every synced client the new title.
+   */
+  private async renameSession(client: ClientState, msg: Extract<ClientMessage, { type: "rename" }>): Promise<void> {
+    const provider = this.opts.providers.find((p) => p.agent === msg.agent);
+    let error: string | undefined;
+    if (!provider) {
+      error = `unknown agent ${JSON.stringify(msg.agent.slice(0, 40))}`;
+    } else if (!provider.rename) {
+      error = `renaming ${msg.agent} sessions is not supported`;
+    } else {
+      try {
+        await provider.rename(msg.id, msg.title);
+        this.log(`${msg.agent}: renamed session ${msg.id}`);
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+        this.log(`${msg.agent}: rename ${msg.id} failed: ${error}`);
+      }
+    }
+    if (this.stopped) return;
+    this.safeSend(client, error === undefined ? { type: "renameResult", requestId: msg.requestId, ok: true } : { type: "renameResult", requestId: msg.requestId, ok: false, error });
     if (error === undefined) void this.refresh(undefined);
   }
 

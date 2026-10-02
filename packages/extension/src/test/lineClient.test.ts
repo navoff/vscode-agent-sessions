@@ -196,3 +196,34 @@ test("pendingOpen sends the session and settles on the result", async () => {
   await ok;
   h.client.dispose();
 });
+
+test("renameSession sends a rename request and settles on the result", async () => {
+  const h = connected();
+  await tick(5);
+  const sentRenames = () => h.sentToDaemon.map((l) => JSON.parse(l)).filter((m) => m.type === "rename");
+  const done = h.client.renameSession("codex", "u1", "New name");
+  await tick(5);
+  const [req] = sentRenames();
+  assert.deepEqual({ ...req, requestId: typeof req.requestId }, { type: "rename", requestId: "string", agent: "codex", id: "u1", title: "New name" });
+  h.fromDaemon.write(JSON.stringify({ type: "renameResult", requestId: req.requestId, ok: true }) + "\n");
+  await done;
+  const refused = h.client.renameSession("claude", "c1", "Other");
+  await tick(5);
+  h.fromDaemon.write(JSON.stringify({ type: "renameResult", requestId: sentRenames()[1].requestId, ok: false, error: "no rollout found" }) + "\n");
+  await assert.rejects(refused, /no rollout found/);
+  // ok:false without a message still rejects.
+  const bare = h.client.renameSession("codex", "u2", "x");
+  await tick(5);
+  h.fromDaemon.write(JSON.stringify({ type: "renameResult", requestId: sentRenames()[2].requestId, ok: false }) + "\n");
+  await assert.rejects(bare, /rename failed/);
+  h.client.dispose();
+});
+
+test("renameSession rejects on timeout and when closed", async () => {
+  const h = connected({ requestTimeoutMs: 20 });
+  await tick(5);
+  await assert.rejects(h.client.renameSession("codex", "u1", "x"), /no answer within 0 s; the rename may still complete/);
+  h.fromDaemon.end();
+  await tick(5);
+  await assert.rejects(h.client.renameSession("codex", "u3", "x"), /not connected/);
+});

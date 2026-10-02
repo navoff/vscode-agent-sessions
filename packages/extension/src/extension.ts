@@ -428,6 +428,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const c = connections.get(machineId);
       return c ? c.deleteSession(agent, id) : Promise.reject(new Error("the machine is not connected"));
     },
+    renameSession: (machineId, agent, id, title) => {
+      const c = connections.get(machineId);
+      return c ? c.renameSession(agent, id, title) : Promise.reject(new Error("the machine is not connected"));
+    },
     selection: () => treeView.selection,
     getFilter: () => filter,
     setFilter: (f) => {

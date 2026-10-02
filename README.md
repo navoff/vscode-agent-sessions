@@ -32,9 +32,9 @@ agents' own session stores instead and stays out of their way.
   host has none, and streams that machine's sessions into the same tree.
   Double-clicking a remote session opens it in a Remote-SSH window on that
   machine.
-- **Housekeeping.** Pin the sessions you keep coming back to, hide the ones
-  you no longer care about, mark them read or unread, delete them for good,
-  and apply all of that to a multi-selection.
+- **Housekeeping.** Pin the sessions you keep coming back to, rename them,
+  hide the ones you no longer care about, mark them read or unread, delete
+  them for good, and apply most of that to a multi-selection.
 - **One daemon per machine.** All VS Code windows share one background
   process, so opening a second window does not rescan anything.
 
@@ -71,6 +71,7 @@ agents' own session stores instead and stays out of their way.
 | Mark read / unread | Context menu. Opening a session marks it read, and so does having its editor tab active in the focused window: switching to the tab or back to the window clears the mark. A session shown in the Claude Code or Codex sidebar is not detected. |
 | Hide / unhide | The crossed-out eye button that appears on a session under the pointer, to the left of the pin, or "Hide Session" in the context menu, removes the session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. On a hidden session the button turns into an eye that brings the session back. |
 | Pin / unpin | The pin button that appears on a session under the pointer, or "Pin Session" in the context menu, moves the session to the top of its folder and adds a pin to its icon. The same button on a pinned session unpins it. |
+| Rename | The pencil button that appears on a Claude Code or Codex session under the pointer, to the left of the eye, "Rename Session…" in the context menu, or F2 in the focused list asks for a new name and has the agent itself write it, see below. |
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |
@@ -89,6 +90,22 @@ The **Filter Sessions** button opens one list with three sections:
 
 The button icon is filled while the filter restricts anything. The filter is
 remembered per window.
+
+### Renaming sessions
+
+A new name is written by the agent's own tooling on the machine that holds
+the session, so Claude Code and Codex show it too, in `claude --resume`,
+`codex resume` and their VS Code extensions, and it works for remote
+machines:
+
+- Claude Code: `renameSession` from the Agent SDK appends a title to the
+  session file, as `/rename` does.
+- Codex: a `thread/name/set` request to a `codex app-server` started for it
+  lets Codex update its own session index.
+
+A session that is running or open in its agent can be renamed as well. A
+Codex window that has the session open may show the old name until it is
+reloaded.
 
 ### Deleting sessions
 
