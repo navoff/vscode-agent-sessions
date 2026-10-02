@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The folder of the window's workspace stays in the tree, first, even with
+  no sessions, with all its sessions hidden or with the folder hidden: the
+  folder of the `.code-workspace` file, or the single open folder. The
+  other folders of a multi-root workspace show only with a shown session.
+- "Only the workspace open in this window" is on in a newly opened
+  workspace.
+
 ## 0.1.4 - 2026-10-02
 
 - The tooltip of a session shows its full title, the start of the first

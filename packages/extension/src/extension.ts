@@ -76,7 +76,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let filter: FilterState = {
     agents: stored?.agents,
     showRemote: stored?.showRemote ?? true,
-    workspaceOnly: stored?.workspaceOnly === true,
+    workspaceOnly: stored?.workspaceOnly ?? true,
   };
   const updateFilterContext = () => {
     const active = filter.agents !== undefined || filter.workspaceOnly || !filter.showRemote;

@@ -86,7 +86,7 @@ The **Filter Sessions** button opens one list with three sections:
 - **Agents**: which agents to show.
 - **Projects**: "Only the workspace open in this window" keeps, on this
   machine, the sessions whose folder is open in the window. Remote machines
-  are not affected.
+  are not affected. It is on in a newly opened workspace.
 - **Remote machines**: "Show remote machines" toggles the remote machines,
   same as the header button.
 

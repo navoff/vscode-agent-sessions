@@ -47,6 +47,8 @@ export type TreeNode = MachineNode | ProjectNode | SessionNode;
 export interface BuildOptions {
   home: string;
   workspaceFolders: string[];
+  /** Local folder shown even with no sessions to show: where the workspace file lives, or the single open folder. */
+  currentProject?: string;
   isProjectHidden?: (machineId: string, cwd: string) => boolean;
 }
 
@@ -160,10 +162,12 @@ export function buildTree(
       list.push(r);
       byCwd.set(r.session.cwd, list);
     }
+    const current = machine.isLocal ? opts.currentProject : undefined;
+    if (current !== undefined && !byCwd.has(current)) byCwd.set(current, []);
     const projects: ProjectNode[] = [];
     for (const [cwd, list] of byCwd) {
       const hidden = opts.isProjectHidden?.(machine.id, cwd) ?? false;
-      if (hidden && !filter.showHidden) continue;
+      if (hidden && !filter.showHidden && cwd !== current) continue;
       projects.push({
         kind: "project",
         machineId: machine.id,
@@ -175,6 +179,7 @@ export function buildTree(
       });
     }
     projects.sort((a, b) => {
+      if (a.cwd === current || b.cwd === current) return a.cwd === current ? -1 : 1;
       const aw = machine.isLocal && isWorkspace(a.cwd, opts.workspaceFolders) ? 0 : 1;
       const bw = machine.isLocal && isWorkspace(b.cwd, opts.workspaceFolders) ? 0 : 1;
       if (aw !== bw) return aw - bw;

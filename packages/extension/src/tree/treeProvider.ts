@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import * as vscode from "vscode";
 import { buildTree, projectContextValue, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, type MachineInput, type MachineNode, type TreeFilter, type TreeNode } from "./treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
@@ -28,7 +29,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
       const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-      this.tree = buildTree(this.source.machines(), this.source.rows(), this.source.filter(), { home: this.home, workspaceFolders: folders, isProjectHidden: (m, cwd) => this.source.isProjectHidden(m, cwd) });
+      this.tree = buildTree(this.source.machines(), this.source.rows(), this.source.filter(), { home: this.home, workspaceFolders: folders, currentProject: currentProject(folders), isProjectHidden: (m, cwd) => this.source.isProjectHidden(m, cwd) });
       return this.tree;
     }
     if (element.kind === "machine") return element.projects;
@@ -39,7 +40,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   getTreeItem(node: TreeNode): vscode.TreeItem {
     if (node.kind === "machine") return this.machineItem(node);
     if (node.kind === "project") {
-      const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
+      const item = new vscode.TreeItem(node.label, node.sessions.length ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
       item.iconPath = node.hidden ? new vscode.ThemeIcon("folder", new vscode.ThemeColor("disabledForeground")) : new vscode.ThemeIcon("folder");
       if (node.hidden) item.description = "hidden";
       item.tooltip = node.cwd;
@@ -93,4 +94,11 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     item.command = { command: "agentSessions.clickSession", title: "Open Session", arguments: [node] };
     return item;
   }
+}
+
+// An untitled multi-root workspace has no folder of its own.
+function currentProject(folders: string[]): string | undefined {
+  const file = vscode.workspace.workspaceFile;
+  if (file) return file.scheme === "untitled" ? undefined : dirname(file.fsPath);
+  return folders.length === 1 ? folders[0] : undefined;
 }

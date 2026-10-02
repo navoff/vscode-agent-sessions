@@ -238,6 +238,28 @@ test("a hidden folder is dropped whole unless showHidden, and its sessions keep 
   assert.equal(buildTree([local], rows, filter, opts)[0].projects.length, 2);
 });
 
+test("the current project stays first with no sessions, all sessions hidden or the folder hidden; other roots need a shown session", () => {
+  const filter = { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false };
+  const multiRoot = { home: "/home/u", workspaceFolders: ["/home/u/ws", "/home/u/r1", "/home/u/r2"], currentProject: "/home/u/ws" };
+  const empty = buildTree([local, remote], new Map(), filter, multiRoot);
+  assert.deepEqual(empty[0].projects.map((p) => [p.cwd, p.sessions.length]), [["/home/u/ws", 0]]);
+  assert.deepEqual(empty[1].projects, []);
+
+  const rows = new Map<string, SessionRow[]>([
+    ["local", [
+      row("local", s("w", { cwd: "/home/u/ws" }), { hidden: true }),
+      row("local", s("h", { cwd: "/home/u/r1" }), { hidden: true }),
+      row("local", s("v", { cwd: "/home/u/r2", updatedAt: 5000 })),
+    ]],
+  ]);
+  const tree = buildTree([local], rows, filter, multiRoot);
+  assert.deepEqual(tree[0].projects.map((p) => [p.cwd, p.sessions.length]), [["/home/u/ws", 0], ["/home/u/r2", 1]]);
+
+  const isProjectHidden = (_m: string, cwd: string) => cwd === "/home/u/ws";
+  const folderHidden = buildTree([local], rows, filter, { ...multiRoot, isProjectHidden });
+  assert.equal(projectContextValue(folderHidden[0].projects[0]), "project:hidden:read");
+});
+
 test("sessionTooltip has the title, the first prompt unless it repeats the title, and the update time", () => {
   const now = 1000 + 5 * 60_000;
   const fmt = (ts: number) => `T${ts}`;
