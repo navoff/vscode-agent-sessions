@@ -125,7 +125,7 @@ export class CodexProvider implements SessionProvider {
       const updatedAt = info.activityAt ?? Math.trunc(st.mtimeMs);
       const existing = result.get(info.meta.id);
       if (existing && existing.updatedAt >= updatedAt) continue;
-      result.set(info.meta.id, {
+      const session: SessionInfo = {
         agent: "codex",
         id: info.meta.id,
         title: titles.get(info.meta.id) ?? info.title ?? info.meta.id,
@@ -133,7 +133,9 @@ export class CodexProvider implements SessionProvider {
         createdAt: info.meta.createdAt || updatedAt,
         updatedAt,
         status: info.status,
-      });
+      };
+      if (info.firstPrompt) session.firstPrompt = info.firstPrompt;
+      result.set(info.meta.id, session);
     }
     for (const key of this.cache.keys()) if (!seen.has(key)) this.cache.delete(key);
     return [...result.values()];

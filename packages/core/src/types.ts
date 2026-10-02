@@ -10,6 +10,8 @@ export interface SessionInfo {
   agent: AgentKind;
   id: string;
   title: string;
+  /** Start of the first user message, line breaks kept; shown in the session tooltip. */
+  firstPrompt?: string;
   cwd: string;
   createdAt: number;
   updatedAt: number;

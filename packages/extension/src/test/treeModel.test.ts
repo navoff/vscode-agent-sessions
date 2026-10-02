@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { SessionInfo } from "@agent-sessions/core";
-import { buildTree, projectContextValue, relativeTime, sessionContextValue, sessionDescription, sessionIconName, shortenCwd, type MachineInput } from "../tree/treeModel.js";
+import { buildTree, projectContextValue, relativeTime, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, shortenCwd, type MachineInput } from "../tree/treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 const s = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/home/u/work/a", createdAt: 1, updatedAt: 1000, status: "idle", ...over });
@@ -45,9 +45,9 @@ test("sessionDescription and icon reflect status, unread, hidden and pinned", ()
 test("buildTree groups by machine and project, sorts and filters", () => {
   const rows = new Map<string, SessionRow[]>([
     ["local", [
-      row("local", s("old", { updatedAt: 10 })),
-      row("local", s("run", { status: "running", updatedAt: 5 })),
-      row("local", s("new", { updatedAt: 500 })),
+      row("local", s("old", { createdAt: 10, updatedAt: 900 })),
+      row("local", s("run", { status: "running", createdAt: 5, updatedAt: 950 })),
+      row("local", s("new", { createdAt: 500, updatedAt: 600 })),
       row("local", s("cx", { agent: "codex", cwd: "/home/u/work/b", updatedAt: 50 })),
       row("local", s("hid", { updatedAt: 999 }), { hidden: true }),
     ]],
@@ -58,7 +58,8 @@ test("buildTree groups by machine and project, sorts and filters", () => {
   assert.deepEqual(tree.map((m) => m.machine.id), ["local", "hz", "hz2"]);
   const projects = tree[0].projects;
   assert.deepEqual(projects.map((p) => p.label), ["~/work/b", "~/work/a"]);
-  assert.deepEqual(projects[1].sessions.map((n) => n.row.session.id), ["run", "new", "old"]);
+  // By creation time, newest first: neither activity nor a running turn moves a session.
+  assert.deepEqual(projects[1].sessions.map((n) => n.row.session.id), ["new", "old", "run"]);
   assert.equal(tree[1].projects[0].sessions.length, 1);
   assert.equal(tree[1].projects[0].label, "~/x");
   assert.equal(tree[2].projects[0].label, "/srv/app");
@@ -83,8 +84,8 @@ test("machine without sessions still appears with no projects", () => {
 test("projects without workspace match are ordered by their newest session", () => {
   const rows = new Map<string, SessionRow[]>([
     ["local", [
-      row("local", s("p1run", { cwd: "/p1", status: "running", updatedAt: 1 })),
-      row("local", s("p1new", { cwd: "/p1", updatedAt: 1000 })),
+      row("local", s("p1run", { cwd: "/p1", status: "running", createdAt: 2, updatedAt: 1 })),
+      row("local", s("p1new", { cwd: "/p1", createdAt: 1, updatedAt: 1000 })),
       row("local", s("p2", { cwd: "/p2", updatedAt: 500 })),
     ]],
   ]);
@@ -95,21 +96,21 @@ test("projects without workspace match are ordered by their newest session", () 
   assert.deepEqual(projects[0].sessions.map((n) => n.row.session.id), ["p1run", "p1new"]);
 });
 
-test("pinned sessions come first in their folder, each group keeps the usual order", () => {
+test("pinned sessions come first in their folder, each group is ordered by creation time", () => {
   const rows = new Map<string, SessionRow[]>([
     ["local", [
-      row("local", s("run", { status: "running", updatedAt: 5 })),
-      row("local", s("new", { updatedAt: 500 })),
-      row("local", s("pinOld", { updatedAt: 10 }), { pinned: true }),
-      row("local", s("pinRun", { status: "running", updatedAt: 1 }), { pinned: true }),
-      row("local", s("pinNew", { updatedAt: 400 }), { pinned: true }),
+      row("local", s("run", { status: "running", createdAt: 5, updatedAt: 5 })),
+      row("local", s("new", { createdAt: 500, updatedAt: 500 })),
+      row("local", s("pinOld", { createdAt: 10, updatedAt: 10 }), { pinned: true }),
+      row("local", s("pinRun", { status: "running", createdAt: 1, updatedAt: 1 }), { pinned: true }),
+      row("local", s("pinNew", { createdAt: 400, updatedAt: 400 }), { pinned: true }),
       row("local", s("other", { cwd: "/home/u/work/c", updatedAt: 900 })),
       row("local", s("otherPin", { cwd: "/home/u/work/d", updatedAt: 1 }), { pinned: true }),
     ]],
   ]);
   const tree = buildTree([local], rows, { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false }, { home: "/home/u", workspaceFolders: [] });
   const a = tree[0].projects.find((p) => p.cwd === "/home/u/work/a")!;
-  assert.deepEqual(a.sessions.map((n) => n.row.session.id), ["pinRun", "pinNew", "pinOld", "run", "new"]);
+  assert.deepEqual(a.sessions.map((n) => n.row.session.id), ["pinNew", "pinOld", "pinRun", "new", "run"]);
   // A pin does not move its folder.
   assert.deepEqual(tree[0].projects.map((p) => p.label), ["~/work/c", "~/work/a", "~/work/d"]);
 });
@@ -235,4 +236,14 @@ test("a hidden folder is dropped whole unless showHidden, and its sessions keep 
 
   // Without the callback nothing is hidden.
   assert.equal(buildTree([local], rows, filter, opts)[0].projects.length, 2);
+});
+
+test("sessionTooltip has the title, the first prompt unless it repeats the title, and the update time", () => {
+  const now = 1000 + 5 * 60_000;
+  const fmt = (ts: number) => `T${ts}`;
+  assert.deepEqual(sessionTooltip(s("a", { title: "Title", firstPrompt: "do the thing" }), now, fmt), { title: "Title", firstPrompt: "do the thing", updated: "T1000 (5 min ago)" });
+  assert.deepEqual(sessionTooltip(s("a", { title: "Title" }), now, fmt), { title: "Title", updated: "T1000 (5 min ago)" });
+  assert.deepEqual(sessionTooltip(s("a", { title: "same", firstPrompt: "same" }), now, fmt), { title: "same", updated: "T1000 (5 min ago)" });
+  // The field arrives over the wire unchecked.
+  assert.deepEqual(sessionTooltip(s("a", { title: "Title", firstPrompt: 5 as unknown as string }), now, fmt), { title: "Title", updated: "T1000 (5 min ago)" });
 });

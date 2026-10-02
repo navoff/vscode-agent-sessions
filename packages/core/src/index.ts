@@ -10,3 +10,4 @@ export * from "./util/watch.js";
 export * from "./claude/activity.js";
 export * from "./util/sessionId.js";
 export * from "./util/sessionTitle.js";
+export * from "./util/firstPrompt.js";

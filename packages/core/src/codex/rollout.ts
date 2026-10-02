@@ -1,5 +1,6 @@
 import { open, type FileHandle } from "node:fs/promises";
 import type { SessionStatus } from "../types.js";
+import { normalizeFirstPrompt } from "../util/firstPrompt.js";
 
 export interface CodexRolloutMeta {
   id: string;
@@ -11,6 +12,8 @@ export interface CodexRolloutMeta {
 export interface CodexRolloutInfo {
   meta: CodexRolloutMeta;
   title?: string;
+  /** The start of the first user message, longer than the title. */
+  firstPrompt?: string;
   status: SessionStatus;
   /** Timestamp of the last message or task event; undefined when none was found in the tail. */
   activityAt?: number;
@@ -61,6 +64,12 @@ export function titleFromUserText(text: string): string | undefined {
 }
 
 export function extractFirstPrompt(lines: Iterable<string>): string | undefined {
+  const text = extractFirstUserText(lines);
+  return text === undefined ? undefined : titleFromUserText(text);
+}
+
+/** The whole text of the first user message that can give a title. */
+export function extractFirstUserText(lines: Iterable<string>): string | undefined {
   for (const line of lines) {
     if (!line.includes('"role":"user"')) continue;
     let r: unknown;
@@ -74,8 +83,7 @@ export function extractFirstPrompt(lines: Iterable<string>): string | undefined 
     for (const c of rec.payload.content) {
       const text = (c as { text?: unknown })?.text;
       if (typeof text !== "string") continue;
-      const title = titleFromUserText(text);
-      if (title) return title;
+      if (titleFromUserText(text)) return text;
     }
   }
   return undefined;
@@ -198,9 +206,12 @@ export async function readRolloutInfo(filePath: string, size: number, now: numbe
     if (!meta.isUserThread) return { meta, status: "idle" };
     const headLines = headText.split("\n");
     if (headLen < size) headLines.pop();
-    const title = extractFirstPrompt(headLines);
+    const text = extractFirstUserText(headLines);
     const tail = await readTailBackwards(fh, size, now);
-    return { meta, title, status: tail.status, activityAt: tail.activityAt };
+    const info: CodexRolloutInfo = { meta, title: text === undefined ? undefined : titleFromUserText(text), status: tail.status, activityAt: tail.activityAt };
+    const firstPrompt = normalizeFirstPrompt(text);
+    if (firstPrompt) info.firstPrompt = firstPrompt;
+    return info;
   } finally {
     await fh.close();
   }

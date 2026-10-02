@@ -3,10 +3,12 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
+import { normalizeFirstPrompt } from "../util/firstPrompt.js";
 import { isValidSessionId } from "../util/sessionId.js";
 import { normalizeSessionTitle } from "../util/sessionTitle.js";
 import { guardWatcher } from "../util/watch.js";
 import { indexSessionFiles, readLastMessageTimestamp } from "./activity.js";
+import { readPromptText } from "./firstPrompt.js";
 import { isProcessAlive, readClaudeRegistry } from "./registry.js";
 
 export interface SdkSessionInfo {
@@ -69,6 +71,11 @@ async function findTranscripts(projectsDir: string, id: string): Promise<string[
   return found;
 }
 
+interface PromptEntry {
+  sdk: string;
+  text: string | undefined;
+}
+
 interface ActivityEntry {
   mtimeMs: number;
   size: number;
@@ -84,6 +91,8 @@ export class ClaudeProvider implements SessionProvider {
   private readonly isAlive: (pid: number) => boolean;
   private readonly log: (msg: string) => void;
   private readonly activity = new Map<string, ActivityEntry>();
+  /** First prompts by transcript path; a prompt never changes, so each is read once. */
+  private readonly prompts = new Map<string, PromptEntry>();
   /** Working directories from the last snapshot, passed to the SDK as `dir`. */
   private cwds = new Map<string, string>();
 
@@ -109,14 +118,18 @@ export class ClaudeProvider implements SessionProvider {
     const files = await indexSessionFiles(join(this.claudeDir, "projects"));
     const seen = new Set<string>();
     const updated = new Map<string, number>();
+    const prompts = new Map<string, string>();
     for (const s of sessions) {
       const path = files.get(s.sessionId);
       if (!path) continue;
       const ts = await this.messageTime(path);
       if (ts !== undefined) updated.set(s.sessionId, ts);
+      const prompt = s.firstPrompt ? await this.promptText(path, s.firstPrompt) : undefined;
+      if (prompt !== undefined) prompts.set(s.sessionId, prompt);
       seen.add(path);
     }
     for (const key of this.activity.keys()) if (!seen.has(key)) this.activity.delete(key);
+    for (const key of this.prompts.keys()) if (!seen.has(key)) this.prompts.delete(key);
     this.cwds = new Map(sessions.filter((s) => s.cwd).map((s) => [s.sessionId, s.cwd as string]));
     return sessions.map((s) => {
       const live = registry.get(s.sessionId);
@@ -129,6 +142,8 @@ export class ClaudeProvider implements SessionProvider {
         updatedAt: updated.get(s.sessionId) ?? s.lastModified,
         status: live ? (live.status === "busy" ? "running" : "idle") : "idle",
       };
+      const firstPrompt = normalizeFirstPrompt(prompts.get(s.sessionId) ?? s.firstPrompt);
+      if (firstPrompt) info.firstPrompt = firstPrompt;
       if (live) info.live = { pid: live.pid, statusUpdatedAt: live.statusUpdatedAt };
       return info;
     });
@@ -183,6 +198,23 @@ export class ClaudeProvider implements SessionProvider {
       await this.renameSession(id, name);
     }
     this.log(`claude: renamed session ${id}`);
+  }
+
+  /**
+   * The first prompt with its line breaks, taken from the transcript: the
+   * SDK gives it as one line. Undefined when it is not found there.
+   */
+  private async promptText(path: string, sdkFirstPrompt: string): Promise<string | undefined> {
+    const cached = this.prompts.get(path);
+    if (cached && cached.sdk === sdkFirstPrompt) return cached.text;
+    let text: string | undefined;
+    try {
+      text = await readPromptText(path, sdkFirstPrompt);
+    } catch {
+      text = undefined;
+    }
+    this.prompts.set(path, { sdk: sdkFirstPrompt, text });
+    return text;
   }
 
   private async messageTime(path: string): Promise<number | undefined> {

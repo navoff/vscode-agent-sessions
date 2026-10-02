@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractFirstPrompt, parseRolloutMeta, readRolloutInfo, statusFromTail, titleFromUserText } from "../codex/rollout.js";
+import { extractFirstPrompt, extractFirstUserText, parseRolloutMeta, readRolloutInfo, statusFromTail, titleFromUserText } from "../codex/rollout.js";
 
 const meta = (payload: Record<string, unknown>) => JSON.stringify({ type: "session_meta", payload });
 const userMsg = (text: string) =>
@@ -41,6 +41,13 @@ test("extractFirstPrompt returns the first real user text", () => {
   assert.equal(extractFirstPrompt([meta({ id: "u1" })]), undefined);
 });
 
+test("extractFirstUserText returns that message whole", () => {
+  const lines = [meta({ id: "u1" }), userMsg("# AGENTS.md instructions"), userMsg("write the report\nabout the  build"), userMsg("second")];
+  assert.equal(extractFirstUserText(lines), "write the report\nabout the  build");
+  assert.equal(extractFirstPrompt(lines), "write the report");
+  assert.equal(extractFirstUserText([meta({ id: "u1" })]), undefined);
+});
+
 test("statusFromTail follows the last task event", () => {
   assert.equal(statusFromTail([event("task_started"), event("token_count")].join("\n")), "running");
   assert.equal(statusFromTail([event("task_started"), event("task_complete")].join("\n")), "idle");
@@ -61,13 +68,15 @@ test("readRolloutInfo reads meta, title and status from a file", async () => {
   const lines = [
     meta({ id: "u1", timestamp: "2026-09-28T09:01:41.268Z", cwd: "/w", source: "vscode", thread_source: "user" }),
     userMsg("<environment_context>"),
-    userMsg("task of the day"),
+    userMsg("task of the day\nwith  details " + "x".repeat(300)),
     event("task_started"),
   ];
   await writeFile(file, lines.join("\n") + "\n");
   const info = await readRolloutInfo(file, (await stat(file)).size);
   assert.equal(info?.meta.id, "u1");
   assert.equal(info?.title, "task of the day");
+  // The first prompt is the whole message with its line breaks, cut to 200 characters.
+  assert.equal(info?.firstPrompt, "task of the day\nwith details " + "x".repeat(170) + "…");
   assert.equal(info?.status, "running");
 });
 

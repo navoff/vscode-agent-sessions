@@ -1,4 +1,4 @@
-import type { AgentKind } from "@agent-sessions/core";
+import type { AgentKind, SessionInfo } from "@agent-sessions/core";
 import type { MachineState } from "../connection/machineConnection.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
@@ -74,6 +74,21 @@ export function sessionDescription(row: SessionRow, now: number): string {
   return parts.join(" · ");
 }
 
+export interface SessionTooltip {
+  title: string;
+  /** Absent when the session has none or it repeats the title. */
+  firstPrompt?: string;
+  updated: string;
+}
+
+export function sessionTooltip(session: SessionInfo, now: number, formatTime: (ts: number) => string = (ts) => new Date(ts).toLocaleString()): SessionTooltip {
+  const out: SessionTooltip = { title: session.title, updated: `${formatTime(session.updatedAt)} (${relativeTime(session.updatedAt, now)})` };
+  // The field arrives from the daemon unchecked.
+  const prompt: unknown = session.firstPrompt;
+  if (typeof prompt === "string" && prompt && prompt !== session.title) out.firstPrompt = prompt;
+  return out;
+}
+
 export function sessionIconName(row: SessionRow): string {
   const mark = row.hidden ? "-hidden" : row.unread ? "-unread" : "";
   return `${row.session.agent}${mark}${row.pinned ? "-pinned" : ""}`;
@@ -105,13 +120,12 @@ export function projectContextValue(node: ProjectNode): string {
   return ["project", node.hidden ? "hidden" : "visible", node.unread ? "unread" : "read"].join(":");
 }
 
+// Pinned first, then by creation time, newest first: a session keeps its
+// place in the folder whatever its activity.
 function sortRows(rows: SessionRow[]): SessionRow[] {
   return [...rows].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    const ar = a.session.status === "running" ? 0 : 1;
-    const br = b.session.status === "running" ? 0 : 1;
-    if (ar !== br) return ar - br;
-    return b.session.updatedAt - a.session.updatedAt;
+    return b.session.createdAt - a.session.createdAt;
   });
 }
 

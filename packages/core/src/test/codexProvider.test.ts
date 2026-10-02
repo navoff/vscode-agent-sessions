@@ -51,6 +51,7 @@ test("snapshot returns user threads with index titles and statuses", async () =>
   assert.equal(list.length, 1);
   assert.equal(list[0].id, "u1");
   assert.equal(list[0].title, "New name");
+  assert.equal(list[0].firstPrompt, "first prompt");
   assert.equal(list[0].status, "idle");
   assert.equal(list[0].cwd, "/w");
   assert.equal(list[0].createdAt, Date.parse("2026-09-28T09:01:41.268Z"));

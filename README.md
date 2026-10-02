@@ -72,6 +72,8 @@ agents' own session stores instead and stays out of their way.
 | Hide / unhide | The crossed-out eye button that appears on a session under the pointer, to the left of the pin, or "Hide Session" in the context menu, removes the session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. On a hidden session the button turns into an eye that brings the session back. |
 | Pin / unpin | The pin button that appears on a session under the pointer, or "Pin Session" in the context menu, moves the session to the top of its folder and adds a pin to its icon. The same button on a pinned session unpins it. |
 | Rename | The pencil button that appears on a Claude Code or Codex session under the pointer, to the left of the eye, "Rename Session…" in the context menu, or F2 in the focused list asks for a new name and has the agent itself write it, see below. |
+| See what a session is about | Hover a session: the tooltip shows its full title, the start of the first prompt and the time of the last update. |
+| Order | Sessions in a folder go by creation time, newest first, with pinned ones above the rest. Activity does not move a session. |
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |

@@ -53,6 +53,29 @@ test("snapshot merges SDK sessions with the live registry", async () => {
   assert.equal(b.title, "first words");
   assert.equal(b.createdAt, 200);
   assert.equal(b.live, undefined);
+  assert.equal(b.firstPrompt, "first words");
+  // A session without a first prompt has no such field at all.
+  assert.ok(!("firstPrompt" in a));
+});
+
+test("snapshot takes the first prompt with its line breaks from the transcript", async () => {
+  const claudeDir = await makeClaudeDir();
+  await writeFile(
+    join(claudeDir, "projects", "-w", "b.jsonl"),
+    jsonl({ type: "user", isMeta: true, message: { content: [{ type: "text", text: "fix the\nmeta" }] } }) +
+      jsonl({ type: "user", timestamp: new Date(T1).toISOString(), message: { content: [{ type: "image" }, { type: "text", text: "fix the\n bug  now\n\nplease" }] } }) +
+      jsonl({ type: "user", timestamp: new Date(T2).toISOString(), message: { content: "second" } }),
+  );
+  await writeFile(join(claudeDir, "projects", "-w", "c.jsonl"), jsonl({ type: "user", message: { content: "something else" } }));
+  const list: SdkSessionInfo[] = [
+    { sessionId: "b", summary: "", firstPrompt: "fix the  bug  now  please", lastModified: 1 },
+    { sessionId: "c", summary: "", firstPrompt: "not in  the transcript", lastModified: 1 },
+  ];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => list, isAlive: () => false });
+  const got = new Map((await p.snapshot()).map((s) => [s.id, s.firstPrompt]));
+  assert.equal(got.get("b"), "fix the\nbug now\nplease");
+  // Not found in the transcript: the SDK's one line is used.
+  assert.equal(got.get("c"), "not in the transcript");
 });
 
 test("snapshot uses the last message time, not file mtime or registry time", async () => {

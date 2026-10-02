@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The tooltip of a session shows its full title, the start of the first
+  prompt and the time of the last update instead of the pid, folder and id.
+- Sessions in a folder are ordered by creation time, newest first, pinned
+  ones above the rest. A running or updated session no longer moves.
 - The "Add Machine" button in the view header shows a remote-machine icon
   instead of a plus.
 - Sessions can be pinned: the pin button on a session, or "Pin Session" in

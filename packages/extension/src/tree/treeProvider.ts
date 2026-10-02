@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { buildTree, projectContextValue, sessionContextValue, sessionDescription, sessionIconName, type MachineInput, type MachineNode, type TreeFilter, type TreeNode } from "./treeModel.js";
+import { buildTree, projectContextValue, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, type MachineInput, type MachineNode, type TreeFilter, type TreeNode } from "./treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 export interface TreeSource {
@@ -74,17 +74,20 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     item.iconPath = { light: icon, dark: icon };
     const md = new vscode.MarkdownString();
     // Values from session files go through appendText so markdown in them is escaped.
+    const tip = sessionTooltip(s, now);
     md.appendMarkdown("**");
-    md.appendText(s.title);
-    md.appendMarkdown("**\n\n- Agent: ");
-    md.appendText(s.agent);
-    md.appendMarkdown("\n- Status: ");
-    md.appendText(`${s.status}${s.live ? ` (pid ${s.live.pid})` : ""}`);
-    md.appendMarkdown("\n- Folder: ");
-    md.appendText(s.cwd || "(no folder)");
-    md.appendMarkdown("\n- Id: ");
-    md.appendText(s.id);
-    md.appendMarkdown(`\n- Created: ${new Date(s.createdAt).toLocaleString()}\n- Updated: ${new Date(s.updatedAt).toLocaleString()}\n`);
+    md.appendText(tip.title);
+    md.appendMarkdown("**\n\n");
+    if (tip.firstPrompt) {
+      // Two spaces before a newline keep the prompt's line breaks without paragraph gaps.
+      tip.firstPrompt.split("\n").forEach((line, i) => {
+        if (i > 0) md.appendMarkdown("  \n");
+        md.appendText(line);
+      });
+      md.appendMarkdown("\n\n");
+    }
+    md.appendMarkdown("Updated: ");
+    md.appendText(tip.updated);
     item.tooltip = md;
     item.contextValue = sessionContextValue(row);
     item.command = { command: "agentSessions.clickSession", title: "Open Session", arguments: [node] };

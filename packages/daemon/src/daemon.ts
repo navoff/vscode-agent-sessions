@@ -24,6 +24,7 @@ export interface DaemonClient {
 export function sameSession(a: SessionInfo, b: SessionInfo): boolean {
   return (
     a.title === b.title &&
+    a.firstPrompt === b.firstPrompt &&
     a.cwd === b.cwd &&
     a.createdAt === b.createdAt &&
     a.updatedAt === b.updatedAt &&

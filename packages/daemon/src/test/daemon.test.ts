@@ -332,6 +332,7 @@ test("stop during an in-flight refresh sends nothing afterwards", async () => {
 test("sameSession compares the fields that matter", () => {
   assert.ok(sameSession(s("claude", "a"), s("claude", "a")));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { status: "running" })));
+  assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { firstPrompt: "p" })));
   const live = (pid: number, statusUpdatedAt: number) => s("claude", "a", { live: { pid, statusUpdatedAt } });
   assert.ok(sameSession(live(1, 10), live(1, 10)));
   assert.ok(!sameSession(live(1, 10), live(2, 10)));
