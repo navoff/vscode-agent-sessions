@@ -2,7 +2,7 @@
   "name": "vscode-agent-sessions",
   "displayName": "AI Agent Sessions",
   "description": "Claude Code and Codex sessions from local and remote machines in one view",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "navoff",
   "license": "MIT",
   "repository": {

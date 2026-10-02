@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 - 2026-10-02
 
 - The tooltip of a session shows its full title, the start of the first
   prompt and the time of the last update instead of the pid, folder and id.
