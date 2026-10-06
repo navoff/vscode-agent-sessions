@@ -11,7 +11,7 @@ import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnecti
 import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
-import { CODEX_EDITOR_VIEW_TYPE, openSession, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
+import { CODEX_EDITOR_VIEW_TYPE, confirmAndMoveSessions, openSession, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
 import { claudeFindsSession, isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
@@ -20,6 +20,7 @@ import { SessionMarks } from "./state/marks.js";
 import { SessionStore, type SessionRow } from "./state/sessionStore.js";
 import { parentPid } from "./state/processParent.js";
 import { codexTabSessionId, pickByElimination, pickViewed, tabCandidates, type AgentTab } from "./state/viewedSession.js";
+import { SessionsDragAndDrop } from "./tree/dragDropController.js";
 import type { MachineInput } from "./tree/treeModel.js";
 import { SessionsTreeProvider } from "./tree/treeProvider.js";
 
@@ -108,7 +109,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.Uri.joinPath(context.extensionUri, "resources"),
     homedir(),
   );
-  const treeView = vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true });
+  // Sessions dragged onto a folder move there; sessionDeps is set up further down.
+  const dragAndDropController = new SessionsDragAndDrop((plan) => confirmAndMoveSessions(sessionDeps, plan.machineId, plan.sessions.map((n) => n.row.session), plan.cwd));
+  const treeView = vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true, dragAndDropController });
   context.subscriptions.push(tree, treeView);
   const refresh = () => tree.refresh();
 
@@ -450,6 +453,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     renameSession: (machineId, agent, id, title) => {
       const c = connections.get(machineId);
       return c ? c.renameSession(agent, id, title) : Promise.reject(new Error("the machine is not connected"));
+    },
+    moveSession: (machineId, agent, id, cwd) => {
+      const c = connections.get(machineId);
+      return c ? c.moveSession(agent, id, cwd) : Promise.reject(new Error("the machine is not connected"));
     },
     selection: () => treeView.selection,
     getFilter: () => filter,

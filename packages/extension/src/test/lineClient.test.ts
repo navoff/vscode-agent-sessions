@@ -227,3 +227,24 @@ test("renameSession rejects on timeout and when closed", async () => {
   await tick(5);
   await assert.rejects(h.client.renameSession("codex", "u3", "x"), /not connected/);
 });
+
+test("moveSession sends a move request and settles on the result", async () => {
+  const h = connected();
+  await tick(5);
+  const sentMoves = () => h.sentToDaemon.map((l) => JSON.parse(l)).filter((m) => m.type === "move");
+  const done = h.client.moveSession("claude", "c1", "/z");
+  await tick(5);
+  const req = sentMoves()[0];
+  assert.deepEqual({ ...req, requestId: typeof req.requestId }, { type: "move", requestId: "string", agent: "claude", id: "c1", cwd: "/z" });
+  h.fromDaemon.write(JSON.stringify({ type: "moveResult", requestId: req.requestId, ok: true }) + "\n");
+  await done;
+  const refused = h.client.moveSession("claude", "c2", "/z");
+  await tick(5);
+  h.fromDaemon.write(JSON.stringify({ type: "moveResult", requestId: sentMoves()[1].requestId, ok: false, error: "open in Claude Code" }) + "\n");
+  await assert.rejects(refused, /open in Claude Code/);
+  const bare = h.client.moveSession("claude", "c3", "/z");
+  await tick(5);
+  h.fromDaemon.write(JSON.stringify({ type: "moveResult", requestId: sentMoves()[2].requestId, ok: false }) + "\n");
+  await assert.rejects(bare, /move failed/);
+  h.client.dispose();
+});

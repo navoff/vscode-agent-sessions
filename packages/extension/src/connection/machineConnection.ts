@@ -121,6 +121,12 @@ export class MachineConnection {
     return this.client.renameSession(agent, id, title);
   }
 
+  /** Moves a session to another folder through the connected daemon; see LineClient.moveSession. */
+  moveSession(agent: AgentKind, id: string, cwd: string): Promise<void> {
+    if (!this.client || this.state !== "connected") return Promise.reject(new Error("the machine is not connected"));
+    return this.client.moveSession(agent, id, cwd);
+  }
+
   /** Records a pending open through the connected daemon; see LineClient.pendingOpen. */
   pendingOpen(session: SessionInfo): Promise<void> {
     if (!this.client || this.state !== "connected") return Promise.reject(new Error("the machine is not connected"));

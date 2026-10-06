@@ -250,3 +250,19 @@ test("renameSession goes through the connected daemon and fails when not connect
   await done;
   h.conn.dispose();
 });
+
+test("moveSession goes through the connected daemon and fails when not connected", async () => {
+  const h = harness();
+  await assert.rejects(h.conn.moveSession("claude", "c1", "/z"), /not connected/);
+  h.conn.connect();
+  await tick(5);
+  h.procs[0].stdout.write(hello);
+  await tick(5);
+  const done = h.conn.moveSession("claude", "c1", "/z");
+  await tick(5);
+  const req = JSON.parse(h.procs[0].received.find((l) => l.includes('"move"'))!);
+  assert.deepEqual([req.agent, req.id, req.cwd], ["claude", "c1", "/z"]);
+  h.procs[0].stdout.write(JSON.stringify({ type: "moveResult", requestId: req.requestId, ok: true }) + "\n");
+  await done;
+  h.conn.dispose();
+});

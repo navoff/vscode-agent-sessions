@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { watch } from "node:fs";
-import { mkdtemp, mkdir, writeFile, appendFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, appendFile, readFile, readdir, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeProvider, type SdkSessionInfo } from "../claude/provider.js";
+import { claudeProjectDirName } from "../claude/relocate.js";
 
 function inotifyAvailable(dir: string): boolean {
   try { watch(dir, () => {}).close(); return true; } catch { return false; }
@@ -284,4 +285,71 @@ test("rename rejects a non-UUID id and a bad title, and passes SDK errors throug
   assert.equal(calls.length, 0);
   const failing = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, renameSession: async () => { throw new Error(`Session ${ID2} not found`); } });
   await assert.rejects(failing.rename(ID2, "New name"), /not found/);
+});
+
+/** A folder to move a session to, with the project folder Claude Code keeps its sessions in. */
+async function makeMoveTarget(claudeDir: string): Promise<{ cwd: string; projectDir: string }> {
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), "claude-target-")));
+  return { cwd, projectDir: join(claudeDir, "projects", claudeProjectDirName(cwd)!) };
+}
+
+test("claudeProjectDirName replaces every character but letters and digits", () => {
+  assert.equal(claudeProjectDirName("/home/u/work/_my.proj"), "-home-u-work--my-proj");
+  assert.equal(claudeProjectDirName("/" + "a".repeat(200)), undefined);
+});
+
+test("move takes the transcript and its directory to the target's project folder and stamps it", async () => {
+  const claudeDir = await makeDeleteDir();
+  const source = join(claudeDir, "projects", "-w");
+  const first = jsonl({ type: "user", timestamp: new Date(T1).toISOString() });
+  await mkdir(join(source, ID1, "subagents"), { recursive: true });
+  await writeFile(join(source, ID1, "subagents", "agent-1.jsonl"), "{}\n");
+  const { cwd, projectDir } = await makeMoveTarget(claudeDir);
+  const logs: string[] = [];
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, log: (m) => logs.push(m) });
+  await p.move(ID1, cwd);
+  assert.deepEqual(await readdir(source), []);
+  assert.equal(await readFile(join(projectDir, `${ID1}.jsonl`), "utf8"), first + jsonl({ type: "relocated", sessionId: ID1, relocatedCwd: cwd }));
+  assert.equal(await readFile(join(projectDir, ID1, "subagents", "agent-1.jsonl"), "utf8"), "{}\n");
+  assert.deepEqual(logs, [`claude: moved session ${ID1} to ${cwd}`]);
+});
+
+test("move completes an unterminated last line and only stamps a transcript already in place", async () => {
+  const claudeDir = await makeDeleteDir();
+  const { cwd, projectDir } = await makeMoveTarget(claudeDir);
+  await writeFile(join(claudeDir, "projects", "-w", `${ID1}.jsonl`), '{"type":"user"}');
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel });
+  await p.move(ID1, cwd);
+  const stamp = jsonl({ type: "relocated", sessionId: ID1, relocatedCwd: cwd });
+  assert.equal(await readFile(join(projectDir, `${ID1}.jsonl`), "utf8"), '{"type":"user"}\n' + stamp);
+  await p.move(ID1, cwd);
+  assert.equal(await readFile(join(projectDir, `${ID1}.jsonl`), "utf8"), '{"type":"user"}\n' + stamp + stamp);
+});
+
+test("move refuses a session with a live Claude Code process and leaves it in place", async () => {
+  const claudeDir = await makeDeleteDir("idle");
+  const { cwd } = await makeMoveTarget(claudeDir);
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel, isAlive: () => true });
+  await assert.rejects(p.move(ID1, cwd), /open in Claude Code \(pid 700\); close it in Claude Code first/);
+  assert.deepEqual(await readdir(join(claudeDir, "projects", "-w")), [`${ID1}.jsonl`]);
+});
+
+test("move refuses a bad id, a missing or duplicated transcript, a bad target and an occupied one", async () => {
+  const claudeDir = await makeDeleteDir();
+  const source = join(claudeDir, "projects", "-w", `${ID1}.jsonl`);
+  const before = await readFile(source, "utf8");
+  const { cwd, projectDir } = await makeMoveTarget(claudeDir);
+  const p = new ClaudeProvider({ claudeDir, listSessions: async () => sdkDel });
+  await assert.rejects(p.move("../x", cwd), /invalid Claude session id/);
+  await assert.rejects(p.move(ID2, cwd), /no transcript to move/);
+  await assert.rejects(p.move(ID1, "relative/dir"), /not an absolute path/);
+  await assert.rejects(p.move(ID1, join(cwd, "missing")), /is not an existing folder/);
+  await assert.rejects(p.move(ID1, source), /is not an existing folder/);
+  // A leftover directory of the id in the target blocks the move.
+  await mkdir(join(projectDir, ID1), { recursive: true });
+  await assert.rejects(p.move(ID1, cwd), /already has a session with this id/);
+  await writeFile(join(projectDir, `${ID1}.jsonl`), "other\n");
+  await assert.rejects(p.move(ID1, cwd), /transcripts in 2 project folders .*; not moving any of them/);
+  assert.equal(await readFile(source, "utf8"), before);
+  assert.equal(await readFile(join(projectDir, `${ID1}.jsonl`), "utf8"), "other\n");
 });

@@ -72,6 +72,7 @@ agents' own session stores instead and stays out of their way.
 | Hide / unhide | The crossed-out eye button that appears on a session under the pointer, to the left of the pin, or "Hide Session" in the context menu, removes the session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. On a hidden session the button turns into an eye that brings the session back. |
 | Pin / unpin | The pin button that appears on a session under the pointer, or "Pin Session" in the context menu, moves the session to the top of its folder and adds a pin to its icon. The same button on a pinned session unpins it. |
 | Rename | The pencil button that appears on a Claude Code or Codex session under the pointer, to the left of the eye, "Rename Session…" in the context menu, or F2 in the focused list asks for a new name and has the agent itself write it, see below. |
+| Move to another folder | Drag a Claude Code session, or several selected ones, onto a folder of the same machine, or onto a session in it; the drop asks once and moves them, see below. Opening a session of another folder also offers to move it to the folder of the window. |
 | See what a session is about | Hover a session: the tooltip shows its full title, the start of the first prompt and the time of the last update. |
 | Order | Sessions in a folder go by creation time, newest first, with pinned ones above the rest. Activity does not move a session. |
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
@@ -108,6 +109,23 @@ machines:
 A session that is running or open in its agent can be renamed as well. A
 Codex window that has the session open may show the old name until it is
 reloaded.
+
+### Moving sessions to another folder
+
+Claude Code opens only the sessions of the folder open in its window. A
+Claude Code session can be moved to another folder of its machine instead
+of opening a window on its own folder; it also works for remote machines.
+The move is done the way Claude Code does it when the working directory of
+a session changes: the session file and its directory of subagent
+transcripts and tool results go to the project folder of the new directory
+under `~/.claude/projects`, and a `relocated` entry appended to the file
+names that directory. Claude Code then lists and continues the session in
+the new folder; the paths in its history stay as they were.
+
+A session that is open in Claude Code is not moved: close it there first.
+Neither is a session to a folder that does not exist or whose path is
+longer than 200 characters. The window the move was made from does not
+open the session.
 
 ### Deleting sessions
 

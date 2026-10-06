@@ -143,6 +143,13 @@ export class Daemon {
         }
         void this.renameSession(client, msg);
         return;
+      case "move":
+        if (!client.greeted) {
+          this.safeSend(client, { type: "moveResult", requestId: msg.requestId, ok: false, error: "handshake required" });
+          return;
+        }
+        void this.moveSession(client, msg);
+        return;
       case "pendingOpen":
         if (!client.greeted) {
           this.safeSend(client, { type: "pendingOpenResult", requestId: msg.requestId, ok: false, error: "handshake required" });
@@ -215,6 +222,31 @@ export class Daemon {
     }
     if (this.stopped) return;
     this.safeSend(client, error === undefined ? { type: "renameResult", requestId: msg.requestId, ok: true } : { type: "renameResult", requestId: msg.requestId, ok: false, error });
+    if (error === undefined) void this.refresh(undefined);
+  }
+
+  /**
+   * Moves a session to another folder through its provider and answers only
+   * the requester. On success a refresh sends every synced client the new folder.
+   */
+  private async moveSession(client: ClientState, msg: Extract<ClientMessage, { type: "move" }>): Promise<void> {
+    const provider = this.opts.providers.find((p) => p.agent === msg.agent);
+    let error: string | undefined;
+    if (!provider) {
+      error = `unknown agent ${JSON.stringify(msg.agent.slice(0, 40))}`;
+    } else if (!provider.move) {
+      error = `moving ${msg.agent} sessions is not supported`;
+    } else {
+      try {
+        await provider.move(msg.id, msg.cwd);
+        this.log(`${msg.agent}: moved session ${msg.id} to ${msg.cwd}`);
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+        this.log(`${msg.agent}: move ${msg.id} failed: ${error}`);
+      }
+    }
+    if (this.stopped) return;
+    this.safeSend(client, error === undefined ? { type: "moveResult", requestId: msg.requestId, ok: true } : { type: "moveResult", requestId: msg.requestId, ok: false, error });
     if (error === undefined) void this.refresh(undefined);
   }
 

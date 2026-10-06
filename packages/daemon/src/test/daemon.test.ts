@@ -17,6 +17,8 @@ class FakeProvider implements SessionProvider {
   deleteError: Error | undefined;
   renamed: Array<[string, string]> = [];
   renameError: Error | undefined;
+  moved: Array<[string, string]> = [];
+  moveError: Error | undefined;
   private cb: (() => void) | undefined;
   constructor(readonly agent: "claude" | "codex") {}
   async delete(id: string): Promise<void> {
@@ -28,6 +30,11 @@ class FakeProvider implements SessionProvider {
     if (this.renameError) throw this.renameError;
     this.renamed.push([id, title]);
     this.sessions = this.sessions.map((x) => (x.id === id ? { ...x, title } : x));
+  }
+  async move(id: string, cwd: string): Promise<void> {
+    if (this.moveError) throw this.moveError;
+    this.moved.push([id, cwd]);
+    this.sessions = this.sessions.map((x) => (x.id === id ? { ...x, cwd } : x));
   }
   async snapshot(): Promise<SessionInfo[]> {
     this.snapshotCalls++;
@@ -513,4 +520,66 @@ test("rename before a completed hello answers handshake required and renames not
   assert.deepEqual(fresh.sent, [{ type: "renameResult", requestId: "r0", ok: false, error: "handshake required" }]);
   assert.deepEqual(h.codex.renamed, []);
   h.daemon.stop();
+});
+
+test("parse move and moveResult messages", () => {
+  assert.deepEqual(parseClientMessage('{"type":"move","requestId":"7","agent":"claude","id":"u1","cwd":"/z"}'), { type: "move", requestId: "7", agent: "claude", id: "u1", cwd: "/z" });
+  assert.equal(parseClientMessage('{"type":"move","requestId":"7","agent":"claude","id":"u1"}'), undefined);
+  assert.equal(parseClientMessage('{"type":"move","requestId":"7","agent":"claude","id":"u1","cwd":5}'), undefined);
+  assert.equal(parseClientMessage('{"type":"move","agent":"claude","id":"u1","cwd":"/z"}'), undefined);
+  assert.deepEqual(parseDaemonMessage('{"type":"moveResult","requestId":"7","ok":true}'), { type: "moveResult", requestId: "7", ok: true });
+  assert.deepEqual(parseDaemonMessage('{"type":"moveResult","requestId":"7","ok":false,"error":"no"}'), { type: "moveResult", requestId: "7", ok: false, error: "no" });
+  assert.equal(parseDaemonMessage('{"type":"moveResult","requestId":"7"}'), undefined);
+  assert.equal(parseDaemonMessage('{"type":"moveResult","ok":true}'), undefined);
+});
+
+test("move answers only the requester, then every synced client gets the new folder", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1"), s("codex", "u2")];
+  const { a, b } = await syncedPair(h);
+  const aBefore = a.sent.length;
+  const bBefore = b.sent.length;
+  a.client.handle({ type: "move", requestId: "m1", agent: "codex", id: "u1", cwd: "/z" });
+  await tick(30);
+  assert.deepEqual(h.codex.moved, [["u1", "/z"]]);
+  const aNew = a.sent.slice(aBefore);
+  const bNew = b.sent.slice(bBefore);
+  assert.deepEqual(aNew[0], { type: "moveResult", requestId: "m1", ok: true });
+  assert.ok(!bNew.some((m) => m.type === "moveResult"));
+  for (const msgs of [aNew, bNew]) {
+    assert.deepEqual(msgs.filter((m) => m.type === "changed"), [{ type: "changed", upserted: [s("codex", "u1", { cwd: "/z" })], removed: [] }]);
+  }
+  h.daemon.stop();
+});
+
+test("a failed move answers ok:false with the provider's error and changes nothing", async () => {
+  const h = setup();
+  h.codex.sessions = [s("codex", "u1")];
+  const { a, b } = await syncedPair(h);
+  h.codex.moveError = new Error("the session is open in Claude Code (pid 7); close it in Claude Code first");
+  const aBefore = a.sent.length;
+  const bBefore = b.sent.length;
+  a.client.handle({ type: "move", requestId: "m2", agent: "codex", id: "u1", cwd: "/z" });
+  await tick(30);
+  assert.deepEqual(a.sent.slice(aBefore), [{ type: "moveResult", requestId: "m2", ok: false, error: "the session is open in Claude Code (pid 7); close it in Claude Code first" }]);
+  assert.equal(b.sent.length, bBefore);
+  h.daemon.stop();
+});
+
+test("move for an unknown agent, a provider without move or before hello answers ok:false", async () => {
+  const plain: SessionProvider = { agent: "claude", snapshot: async () => [], watch: () => ({ dispose: () => {} }) };
+  const daemon = new Daemon({ providers: [plain], version: "t", home: "/h", debounceMs: 10, pollMs: 60_000 });
+  const sent: DaemonMessage[] = [];
+  const c = daemon.attach((m) => sent.push(m));
+  c.handle({ type: "move", requestId: "0", agent: "claude", id: "x", cwd: "/z" });
+  c.handle({ type: "hello", protocol: PROTOCOL_VERSION });
+  c.handle({ type: "move", requestId: "1", agent: "opencode", id: "x", cwd: "/z" });
+  c.handle({ type: "move", requestId: "2", agent: "claude", id: "x", cwd: "/z" });
+  await tick(10);
+  assert.deepEqual(sent.filter((m) => m.type === "moveResult"), [
+    { type: "moveResult", requestId: "0", ok: false, error: "handshake required" },
+    { type: "moveResult", requestId: "1", ok: false, error: 'unknown agent "opencode"' },
+    { type: "moveResult", requestId: "2", ok: false, error: "moving claude sessions is not supported" },
+  ]);
+  daemon.stop();
 });

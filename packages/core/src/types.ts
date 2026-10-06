@@ -35,4 +35,6 @@ export interface SessionProvider {
   delete?(id: string): Promise<void>;
   /** Renames a session with the agent's own mechanism; rejects with a readable error. */
   rename?(id: string, title: string): Promise<void>;
+  /** Moves a session to the folder `cwd` of the same machine; rejects with a readable error. */
+  move?(id: string, cwd: string): Promise<void>;
 }

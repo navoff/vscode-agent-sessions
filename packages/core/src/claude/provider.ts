@@ -10,6 +10,7 @@ import { guardWatcher } from "../util/watch.js";
 import { indexSessionFiles, readLastMessageTimestamp } from "./activity.js";
 import { readPromptText } from "./firstPrompt.js";
 import { isProcessAlive, readClaudeRegistry } from "./registry.js";
+import { relocateTranscript } from "./relocate.js";
 
 export interface SdkSessionInfo {
   sessionId: string;
@@ -198,6 +199,27 @@ export class ClaudeProvider implements SessionProvider {
       await this.renameSession(id, name);
     }
     this.log(`claude: renamed session ${id}`);
+  }
+
+  /**
+   * Moves the session to the folder `cwd` as Claude Code does when the
+   * working directory of a session changes; see relocate.ts. A session
+   * with a live Claude Code process is refused: that process keeps writing
+   * to the old place. So is an id whose transcript exists in several
+   * project folders, as in delete().
+   */
+  async move(id: string, cwd: string): Promise<void> {
+    if (!isValidSessionId(id)) throw new Error(`invalid Claude session id ${JSON.stringify(id.slice(0, 80))}`);
+    const live = (await readClaudeRegistry(join(this.claudeDir, "sessions"), this.isAlive)).get(id);
+    if (live) throw new Error(`the session is open in Claude Code (pid ${live.pid}); close it in Claude Code first`);
+    const projectsDir = join(this.claudeDir, "projects");
+    const files = await findTranscripts(projectsDir, id);
+    if (files.length === 0) throw new Error("the session has no transcript to move");
+    if (files.length > 1) {
+      throw new Error(`the session has transcripts in ${files.length} project folders (${files.map((f) => f.split("/").at(-2)).join(", ")}); not moving any of them`);
+    }
+    const target = await relocateTranscript(projectsDir, files[0], id, cwd);
+    this.log(`claude: moved session ${id} to ${target}`);
   }
 
   /**

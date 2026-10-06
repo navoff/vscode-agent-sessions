@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import * as vscode from "vscode";
 import { isValidSessionId, sessionTitleProblem, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
@@ -18,6 +19,8 @@ export interface CommandDeps {
   deleteSession(machineId: string, agent: AgentKind, id: string): Promise<void>;
   /** Renames a session through the daemon of its machine. */
   renameSession(machineId: string, agent: AgentKind, id: string, title: string): Promise<void>;
+  /** Moves a session to another folder through the daemon of its machine. */
+  moveSession(machineId: string, agent: AgentKind, id: string, cwd: string): Promise<void>;
   /** Current tree selection, for commands run from a keybinding. */
   selection(): readonly TreeNode[];
   /** Records a session on its machine for a window on its folder to open. */
@@ -99,19 +102,57 @@ function localFolderUri(cwd: string): vscode.Uri {
 }
 
 /**
+ * Moves sessions of one machine to its folder `cwd`; each then shows under
+ * that folder once its daemon reports the change. Failures are shown together.
+ */
+export async function moveSessions(deps: CommandDeps, machineId: string, sessions: readonly SessionInfo[], cwd: string): Promise<void> {
+  const failed: string[] = [];
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Moving to ${cwd}` }, async () => {
+    for (const session of sessions) {
+      try {
+        // The daemon only moves UUID ids; say so here instead of after the round trip.
+        if (!isValidSessionId(session.id)) throw new Error("its id is not a session UUID");
+        await deps.moveSession(machineId, session.agent, session.id, cwd);
+        deps.log.appendLine(`[${machineId}] moved ${session.agent}:${session.id} to ${cwd}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        deps.log.appendLine(`[${machineId}] move ${session.agent}:${session.id} to ${cwd} failed: ${msg}`);
+        failed.push(`"${session.title}": ${msg}`);
+      }
+    }
+  });
+  if (failed.length > 0) void vscode.window.showErrorMessage(`Could not move ${failed.join("; ")}`);
+}
+
+/** Asks before moving sessions dropped on a folder: a drag is easy to make by accident. */
+export async function confirmAndMoveSessions(deps: CommandDeps, machineId: string, sessions: readonly SessionInfo[], cwd: string): Promise<void> {
+  const what = sessions.length === 1 ? `"${sessions[0].title}"` : `${sessions.length} sessions`;
+  const detail = "Claude Code will find and continue the session in the new folder. Paths in its history stay as they were.";
+  const pick = await vscode.window.showWarningMessage(`Move ${what} to ${cwd}?`, { modal: true, detail }, "Move");
+  if (pick === "Move") await moveSessions(deps, machineId, sessions, cwd);
+}
+
+/**
  * Claude Code opens a session of another folder as an empty conversation, so
- * offer to open that folder in a new window, which then opens the session.
+ * offer to open that folder in a new window, which then opens the session,
+ * or to move the session to the folder of this window.
  */
 async function offerClaudeFolder(deps: CommandDeps, session: SessionInfo): Promise<void> {
   const why = "Claude Code opens only sessions of the folder open in its window.";
+  const here = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // A session with a live process is refused by the daemon; do not offer it.
+  const move = here && !session.live ? `Move to ${basename(here)}` : undefined;
   if (!(await isDirectory(session.cwd))) {
-    void vscode.window.showWarningMessage(`"${session.title}" was started in ${session.cwd}, which no longer exists. ${why}`);
+    const pick = await vscode.window.showWarningMessage(`"${session.title}" was started in ${session.cwd}, which no longer exists. ${why}`, ...(move ? [move] : []));
+    if (here && move && pick === move) await moveSessions(deps, "local", [session], here);
     return;
   }
   const newWindow = "Open Folder in New Window";
   const terminal = "Resume in Terminal";
-  const pick = await vscode.window.showInformationMessage(`"${session.title}" belongs to ${session.cwd}. ${why}`, newWindow, terminal);
-  if (pick === newWindow) {
+  const pick = await vscode.window.showInformationMessage(`"${session.title}" belongs to ${session.cwd}. ${why}`, newWindow, ...(move ? [move] : []), terminal);
+  if (here && move && pick === move) {
+    await moveSessions(deps, "local", [session], here);
+  } else if (pick === newWindow) {
     try {
       await deps.pendingOpen("local", session);
     } catch (err) {

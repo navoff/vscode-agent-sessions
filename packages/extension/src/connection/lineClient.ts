@@ -102,6 +102,11 @@ export class LineClient {
     return this.request((requestId) => ({ type: "rename", requestId, agent, id, title }), "; the rename may still complete");
   }
 
+  /** Asks the daemon to move a session to the folder `cwd` of its machine. */
+  moveSession(agent: AgentKind, id: string, cwd: string): Promise<void> {
+    return this.request((requestId) => ({ type: "move", requestId, agent, id, cwd }), "; the move may still complete");
+  }
+
   /** Asks the daemon to record `session` for a window on its folder to open. */
   pendingOpen(session: SessionInfo): Promise<void> {
     return this.request((requestId) => ({ type: "pendingOpen", requestId, session }), "");
@@ -155,6 +160,9 @@ export class LineClient {
         return;
       case "renameResult":
         this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "rename failed"));
+        return;
+      case "moveResult":
+        this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "move failed"));
         return;
       case "pendingOpenResult":
         this.settle(msg.requestId, msg.ok ? undefined : new Error(msg.error ?? "pending open failed"));

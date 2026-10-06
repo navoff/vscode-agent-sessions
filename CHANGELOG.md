@@ -8,6 +8,14 @@
   other folders of a multi-root workspace show only with a shown session.
 - "Only the workspace open in this window" is on in a newly opened
   workspace.
+- Claude Code sessions can be moved to another folder of their machine:
+  drag one or several onto a folder in the tree, or pick "Move to <folder>"
+  in the message shown when opening a session that belongs to another
+  folder than the window's. The session file is moved the way Claude Code
+  moves it when the working directory of a session changes, so Claude Code
+  finds and continues the session in the new folder. A session open in
+  Claude Code is not moved. The daemon protocol is now version 5; a running
+  older daemon is replaced.
 
 ## 0.1.4 - 2026-10-02
 
