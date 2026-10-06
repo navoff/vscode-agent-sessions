@@ -127,7 +127,7 @@ export async function moveSessions(deps: CommandDeps, machineId: string, session
 /** Asks before moving sessions dropped on a folder: a drag is easy to make by accident. */
 export async function confirmAndMoveSessions(deps: CommandDeps, machineId: string, sessions: readonly SessionInfo[], cwd: string): Promise<void> {
   const what = sessions.length === 1 ? `"${sessions[0].title}"` : `${sessions.length} sessions`;
-  const detail = "Claude Code will find and continue the session in the new folder. Paths in its history stay as they were.";
+  const detail = "The agent will continue the session in the new folder. Paths in its history stay as they were.";
   const pick = await vscode.window.showWarningMessage(`Move ${what} to ${cwd}?`, { modal: true, detail }, "Move");
   if (pick === "Move") await moveSessions(deps, machineId, sessions, cwd);
 }

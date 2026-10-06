@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
 import { fileLockHolder } from "../util/fileLock.js";
 import { isValidSessionId } from "../util/sessionId.js";
@@ -40,6 +40,7 @@ export const execFileRunner: CommandRunner = (file, args, opts) =>
 
 const DELETE_TIMEOUT_MS = 30_000;
 const RENAME_TIMEOUT_MS = 30_000;
+const MOVE_TIMEOUT_MS = 60_000;
 
 /** The lines of stderr that start with "Error" if any, else the first 500 characters of the output. */
 function errorText(r: CommandResult): string {
@@ -59,6 +60,7 @@ export interface CodexProviderOptions {
   /** Replaces the request to `codex app-server`; for tests. */
   appServer?: AppServerRequest;
   renameTimeoutMs?: number;
+  moveTimeoutMs?: number;
   /** Where to read kernel file locks from; for tests. Default /proc/locks. */
   procLocksPath?: string;
 }
@@ -79,6 +81,7 @@ export class CodexProvider implements SessionProvider {
   private readonly deleteTimeoutMs: number;
   private readonly appServer: AppServerRequest;
   private readonly renameTimeoutMs: number;
+  private readonly moveTimeoutMs: number;
   private readonly procLocksPath: string | undefined;
 
   constructor(opts: CodexProviderOptions = {}) {
@@ -89,6 +92,7 @@ export class CodexProvider implements SessionProvider {
     this.deleteTimeoutMs = opts.deleteTimeoutMs ?? DELETE_TIMEOUT_MS;
     this.appServer = opts.appServer ?? appServerRequest;
     this.renameTimeoutMs = opts.renameTimeoutMs ?? RENAME_TIMEOUT_MS;
+    this.moveTimeoutMs = opts.moveTimeoutMs ?? MOVE_TIMEOUT_MS;
     this.procLocksPath = opts.procLocksPath;
   }
 
@@ -129,7 +133,7 @@ export class CodexProvider implements SessionProvider {
         agent: "codex",
         id: info.meta.id,
         title: titles.get(info.meta.id) ?? info.title ?? info.meta.id,
-        cwd: info.meta.cwd,
+        cwd: info.cwd ?? info.meta.cwd,
         createdAt: info.meta.createdAt || updatedAt,
         updatedAt,
         status: info.status,
@@ -214,11 +218,42 @@ export class CodexProvider implements SessionProvider {
    */
   async rename(id: string, title: string): Promise<void> {
     if (!isValidSessionId(id)) throw new Error(`invalid Codex session id ${JSON.stringify(id.slice(0, 80))}`);
-    const params = { threadId: id, name: normalizeSessionTitle(title) };
-    const opts = { env: { ...this.env, CODEX_HOME: this.codexDir }, timeoutMs: this.renameTimeoutMs };
-    await this.withCodex(["app-server"], ["-lc", 'CODEX_HOME="$1" exec codex app-server', "_", this.codexDir], async (file, args, viaShell) => {
+    await this.appServerCall("thread/name/set", { threadId: id, name: normalizeSessionTitle(title) }, this.renameTimeoutMs);
+    this.log(`codex: renamed session ${id}`);
+  }
+
+  /**
+   * Moves the session to the folder `cwd` with `thread/resume` of a `codex
+   * app-server` started for this one request: resumed with another working
+   * directory, Codex records it in the rollout and in its state, keeps the
+   * other settings of the thread and continues the thread there. The
+   * rollout file stays where it is. A running thread, or one open in
+   * another Codex process, is refused: that process goes on in the old
+   * directory.
+   */
+  async move(id: string, cwd: string): Promise<void> {
+    if (!isValidSessionId(id)) throw new Error(`invalid Codex session id ${JSON.stringify(id.slice(0, 80))}`);
+    if (!isAbsolute(cwd)) throw new Error(`${JSON.stringify(cwd.slice(0, 200))} is not an absolute path`);
+    if (!(await stat(cwd).catch(() => undefined))?.isDirectory()) throw new Error(`${cwd} is not an existing folder`);
+    if (await this.isRunningNow(id)) throw new Error("the session is running, wait until it finishes or stop it before moving");
+    const holder = await fileLockHolder(join(this.codexDir, "thread-writer-locks", `${id.toLowerCase()}.lock`), this.procLocksPath);
+    if (holder !== undefined) {
+      throw new Error(
+        `the session is open in Codex (process ${holder}). Close it in Codex, or reload the VS Code window that has it open, then try again`,
+      );
+    }
+    await this.appServerCall("thread/resume", { threadId: id, cwd, excludeTurns: true }, this.moveTimeoutMs);
+    // A Codex that does not record the directory leaves the session where it was.
+    if ((await this.recordedCwd(id)) !== cwd) throw new Error("Codex did not record the new folder; its version may be too old for that");
+    this.log(`codex: moved session ${id} to ${cwd}`);
+  }
+
+  /** One request to a `codex app-server` started for it, on this provider's Codex directory. */
+  private async appServerCall(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    const opts = { env: { ...this.env, CODEX_HOME: this.codexDir }, timeoutMs };
+    return this.withCodex(["app-server"], ["-lc", 'CODEX_HOME="$1" exec codex app-server', "_", this.codexDir], async (file, args, viaShell) => {
       try {
-        await this.appServer(file, args, "thread/name/set", params, opts);
+        return await this.appServer(file, args, method, params, opts);
       } catch (err) {
         if (!(err instanceof AppServerExitError)) throw err;
         if (viaShell && err.exitCode === 127) throw new Error("codex not found on PATH or in a login shell; set CODEX_BIN");
@@ -226,22 +261,36 @@ export class CodexProvider implements SessionProvider {
         throw new Error(`${err.message}${text ? `: ${text}` : ""}`);
       }
     });
-    this.log(`codex: renamed session ${id}`);
+  }
+
+  /** Rollout files of the session: those a snapshot saw, else those named after the id (rollout-<time>-<id>.jsonl). */
+  private async rolloutFiles(id: string): Promise<string[]> {
+    const files = [...this.cache.entries()].filter(([, e]) => e.info?.meta.id === id).map(([f]) => f);
+    if (files.length > 0) return files;
+    const lower = id.toLowerCase();
+    return (await listRolloutFiles(join(this.codexDir, "sessions"))).filter((f) => basename(f).toLowerCase().endsWith(`-${lower}.jsonl`));
+  }
+
+  /** The working directory the session's rollout names now, read from the file. */
+  private async recordedCwd(id: string): Promise<string | undefined> {
+    for (const file of await this.rolloutFiles(id)) {
+      try {
+        const info = await readRolloutInfo(file, (await stat(file)).size);
+        if (info?.meta.id === id) return info.cwd ?? info.meta.cwd;
+      } catch {
+        // gone or unreadable
+      }
+    }
+    return undefined;
   }
 
   /**
    * Whether the session's rollout ends in a started task, read from the
-   * file now: the last snapshot may be up to a poll interval old. Rollouts
-   * seen by a snapshot are found through the cache, others by their file
-   * name (rollout-<time>-<id>.jsonl). No rollout found means not running.
+   * file now: the last snapshot may be up to a poll interval old. No
+   * rollout found means not running.
    */
   private async isRunningNow(id: string): Promise<boolean> {
-    let files = [...this.cache.entries()].filter(([, e]) => e.info?.meta.id === id).map(([f]) => f);
-    if (files.length === 0) {
-      const lower = id.toLowerCase();
-      files = (await listRolloutFiles(join(this.codexDir, "sessions"))).filter((f) => basename(f).toLowerCase().endsWith(`-${lower}.jsonl`));
-    }
-    for (const file of files) {
+    for (const file of await this.rolloutFiles(id)) {
       try {
         const info = await readRolloutInfo(file, (await stat(file)).size);
         if (info?.meta.id === id && info.status === "running") return true;

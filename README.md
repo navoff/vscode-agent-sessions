@@ -72,7 +72,7 @@ agents' own session stores instead and stays out of their way.
 | Hide / unhide | The crossed-out eye button that appears on a session under the pointer, to the left of the pin, or "Hide Session" in the context menu, removes the session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. On a hidden session the button turns into an eye that brings the session back. |
 | Pin / unpin | The pin button that appears on a session under the pointer, or "Pin Session" in the context menu, moves the session to the top of its folder and adds a pin to its icon. The same button on a pinned session unpins it. |
 | Rename | The pencil button that appears on a Claude Code or Codex session under the pointer, to the left of the eye, "Rename Session…" in the context menu, or F2 in the focused list asks for a new name and has the agent itself write it, see below. |
-| Move to another folder | Drag a Claude Code session, or several selected ones, onto a folder of the same machine, or onto a session in it; the drop asks once and moves them, see below. Opening a session of another folder also offers to move it to the folder of the window. |
+| Move to another folder | Drag a Claude Code or Codex session, or several selected ones, onto a folder of the same machine, or onto a session in it; the drop asks once and moves them, see below. Opening a session of another folder also offers to move it to the folder of the window. |
 | See what a session is about | Hover a session: the tooltip shows its full title, the start of the first prompt and the time of the last update. |
 | Order | Sessions in a folder go by creation time, newest first, with pinned ones above the rest. Activity does not move a session. |
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
@@ -126,6 +126,14 @@ A session that is open in Claude Code is not moved: close it there first.
 Neither is a session to a folder that does not exist or whose path is
 longer than 200 characters. The window the move was made from does not
 open the session.
+
+A Codex session opens in any window, so moving it only changes the folder
+it is listed under and works in. Codex does it itself: a `thread/resume`
+request with the new working directory to a `codex app-server` started for
+it makes Codex record the directory in the session file and in its state,
+with the other settings of the session kept. The session file stays where
+it is. A Codex session that is running or open in Codex is not moved, and
+a Codex window may show the old folder until it is reloaded.
 
 ### Deleting sessions
 

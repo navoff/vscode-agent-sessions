@@ -23,6 +23,11 @@ test("a drop on a folder, or on a session in it, moves the dragged sessions ther
   assert.deepEqual(planDrop([a], session("local", "c", "/z")), { ok: true, machineId: "local", cwd: "/z", sessions: [a] });
 });
 
+test("Codex sessions move as well", () => {
+  const c = session("local", "c", "/x", { agent: "codex" });
+  assert.deepEqual(planDrop([c], project("local", "/z")), { ok: true, machineId: "local", cwd: "/z", sessions: [c] });
+});
+
 test("sessions already in the folder stay, and other dragged nodes are ignored", () => {
   const a = session("local", "a", "/x");
   const z = session("local", "z", "/z");
@@ -42,7 +47,8 @@ test("one session that cannot be moved refuses the whole drop", () => {
   const a = session("local", "a", "/x");
   const target = project("local", "/z");
   assert.match(reason(planDrop([a, session("hz", "r", "/x")], target)), /its own machine/);
-  assert.match(reason(planDrop([a, session("local", "c", "/x", { agent: "codex" })], target)), /Only Claude Code sessions/);
+  assert.match(reason(planDrop([a, session("local", "o", "/x", { agent: "opencode" })], target)), /Only Claude Code and Codex sessions/);
+  assert.match(reason(planDrop([a, session("local", "c", "/x", { agent: "codex", title: "Busy", status: "running" })], target)), /"Busy" is running/);
   assert.match(reason(planDrop([a, session("local", "l", "/x", { title: "Live", live: { pid: 7, statusUpdatedAt: 1 } })], target)), /"Live" is open in Claude Code/);
   // The same folder path on another machine is another folder.
   assert.match(reason(planDrop([session("hz", "r", "/z")], target)), /its own machine/);

@@ -16,6 +16,12 @@
   finds and continues the session in the new folder. A session open in
   Claude Code is not moved. The daemon protocol is now version 5; a running
   older daemon is replaced.
+- Codex sessions can be dragged to another folder as well. Codex records
+  the new working directory itself, through `thread/resume` of `codex
+  app-server`; a session that is running or open in Codex is not moved.
+- A Codex session shows under the folder it last worked in: the working
+  directory is taken from the last settings or turn record of the session
+  file, not only from its first line.
 
 ## 0.1.4 - 2026-10-02
 

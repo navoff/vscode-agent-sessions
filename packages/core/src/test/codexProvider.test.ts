@@ -318,3 +318,77 @@ test("rename refuses a non-UUID id and a bad title without starting anything", a
   await assert.rejects(p.rename(CID, "a\nb"), /single line/);
   assert.equal(s.calls.length, 0);
 });
+
+const settingsApplied = (cwd: string) => JSON.stringify({ type: "event_msg", payload: { type: "thread_settings_applied", thread_settings: { model: "m", cwd } } });
+
+/** An app-server that, like Codex, records the directory a thread is resumed in; `record: false` is a Codex that does not. */
+function resumeRecorder(file: string, record = true) {
+  const s = serverRecorder([]);
+  const request: AppServerRequest = async (f, args, method, params, opts) => {
+    await s.request(f, args, method, params, opts);
+    if (record) await appendFile(file, settingsApplied((params as { cwd: string }).cwd) + "\n");
+    return {};
+  };
+  return { calls: s.calls, request };
+}
+
+test("snapshot shows a thread in the directory it was last resumed in", async () => {
+  const { dir, file } = await makeDeleteDir();
+  const p = new CodexProvider({ codexDir: dir });
+  assert.equal((await p.snapshot())[0].cwd, "/w");
+  await appendFile(file, settingsApplied("/z") + "\n");
+  assert.equal((await p.snapshot())[0].cwd, "/z");
+});
+
+test("move resumes the thread in the new folder through codex app-server and checks the rollout", async () => {
+  const { dir, file } = await makeDeleteDir();
+  const target = await mkdtemp(join(tmpdir(), "codex-target-"));
+  const s = resumeRecorder(file);
+  const logs: string[] = [];
+  const p = new CodexProvider({ codexDir: dir, env: { PATH: "/bin" }, appServer: s.request, log: (m) => logs.push(m) });
+  await p.move(CID, target);
+  assert.equal(s.calls.length, 1);
+  assert.deepEqual([s.calls[0].file, s.calls[0].args, s.calls[0].method], ["codex", ["app-server"], "thread/resume"]);
+  assert.deepEqual(s.calls[0].params, { threadId: CID, cwd: target, excludeTurns: true });
+  assert.equal(s.calls[0].env.CODEX_HOME, dir);
+  assert.equal(s.calls[0].timeoutMs, 60_000);
+  assert.deepEqual(logs, [`codex: moved session ${CID} to ${target}`]);
+  assert.equal((await p.snapshot())[0].cwd, target);
+});
+
+test("move fails when Codex does not record the new folder", async () => {
+  const { dir, file } = await makeDeleteDir();
+  const target = await mkdtemp(join(tmpdir(), "codex-target-"));
+  const p = new CodexProvider({ codexDir: dir, appServer: resumeRecorder(file, false).request });
+  await assert.rejects(() => p.move(CID, target), /Codex did not record the new folder/);
+  const failing = new CodexProvider({ codexDir: dir, appServer: serverRecorder([new Error("no rollout found for thread id")]).request });
+  await assert.rejects(() => failing.move(CID, target), /no rollout found for thread id/);
+});
+
+test("move refuses a bad id or target, a running thread and one whose writer lock is held", async () => {
+  const { dir, file } = await makeDeleteDir();
+  const target = await mkdtemp(join(tmpdir(), "codex-target-"));
+  const s = resumeRecorder(file);
+  const p = new CodexProvider({ codexDir: dir, appServer: s.request });
+  await assert.rejects(() => p.move("../x", target), /invalid Codex session id/);
+  await assert.rejects(() => p.move(CID, "relative/dir"), /not an absolute path/);
+  await assert.rejects(() => p.move(CID, join(target, "missing")), /is not an existing folder/);
+  await assert.rejects(() => p.move(CID, file), /is not an existing folder/);
+
+  const running = await makeDeleteDir("task_started");
+  const busy = new CodexProvider({ codexDir: running.dir, appServer: s.request });
+  await assert.rejects(() => busy.move(CID, target), /the session is running/);
+
+  const lockDir = join(dir, "thread-writer-locks");
+  await mkdir(lockDir, { recursive: true });
+  const lock = join(lockDir, `${CID}.lock`);
+  await writeFile(lock, "");
+  const st = await stat(lock);
+  const major = (Math.floor(st.dev / 256) & 0xfff).toString(16);
+  const minor = ((st.dev & 0xff) | (Math.floor(st.dev / 4096) & 0xfff00)).toString(16);
+  const locks = join(dir, "proc-locks");
+  await writeFile(locks, `224: FLOCK  ADVISORY  WRITE 601322 ${major}:${minor}:${st.ino} 0 EOF\n`);
+  const held = new CodexProvider({ codexDir: dir, appServer: s.request, procLocksPath: locks });
+  await assert.rejects(() => held.move(CID, target), /open in Codex \(process 601322\)/);
+  assert.equal(s.calls.length, 0);
+});

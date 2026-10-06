@@ -179,3 +179,26 @@ test("an abandoned task_started older than 30 minutes is idle, a fresh one is ru
   const minuteLater = Date.parse("2026-09-08T15:00:30.000Z");
   assert.equal((await readRolloutInfo(file, size, minuteLater))?.status, "running");
 });
+
+const settingsApplied = (cwd: string) => JSON.stringify({ type: "event_msg", payload: { type: "thread_settings_applied", thread_settings: { model: "m", cwd } } });
+const turnContext = (cwd: string) => JSON.stringify({ type: "turn_context", payload: { cwd, model: "m" } });
+
+test("readRolloutInfo takes a changed working directory from the last settings or turn record", async () => {
+  const start = meta({ id: "t1", timestamp: "2026-09-29T10:00:00.000Z", cwd: "/w", thread_source: "user" });
+  const info = async (lines: string[]) => {
+    const file = await writeRollout([start, userMsg("hi"), ...lines]);
+    return readRolloutInfo(file, (await stat(file)).size);
+  };
+  // Records that repeat the starting directory, or none at all, leave it alone.
+  assert.equal((await info([event("task_started"), turnContext("/w"), event("task_complete"), settingsApplied("/w")]))?.cwd, undefined);
+  assert.equal((await info([event("task_started"), event("task_complete")]))?.cwd, undefined);
+  // A thread resumed in another directory, and nothing after it.
+  assert.equal((await info([event("task_started"), turnContext("/w"), event("task_complete"), settingsApplied("/z")]))?.cwd, "/z");
+  // Turns after the move name the directory too; the last record wins.
+  assert.equal((await info([settingsApplied("/z"), event("task_started"), turnContext("/y"), event("task_complete")]))?.cwd, "/y");
+  assert.equal((await info([turnContext("/z"), settingsApplied("/w")]))?.cwd, undefined);
+  // The record is found beyond 64 KB of later output.
+  assert.equal((await info([settingsApplied("/z"), event("task_started"), event("task_complete"), ...Array.from({ length: 200 }, filler)]))?.cwd, "/z");
+  // A message that quotes such a record is not one.
+  assert.equal((await info([userMsg(`look: ${settingsApplied("/z")} and "turn_context"`), event("task_complete")]))?.cwd, undefined);
+});

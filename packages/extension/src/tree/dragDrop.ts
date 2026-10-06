@@ -18,8 +18,12 @@ export function planDrop(dragged: readonly TreeNode[], target: TreeNode | undefi
   const sessions = dragged.filter((n): n is SessionNode => n.kind === "session" && !(n.machineId === target.machineId && n.row.session.cwd === cwd));
   if (sessions.length === 0) return { ok: false };
   if (sessions.some((n) => n.machineId !== target.machineId)) return { ok: false, reason: "A session can be moved only to a folder of its own machine." };
-  if (sessions.some((n) => n.row.session.agent !== "claude")) return { ok: false, reason: "Only Claude Code sessions can be moved to another folder." };
+  if (sessions.some((n) => n.row.session.agent !== "claude" && n.row.session.agent !== "codex")) {
+    return { ok: false, reason: "Only Claude Code and Codex sessions can be moved to another folder." };
+  }
   const live = sessions.find((n) => n.row.session.live);
   if (live) return { ok: false, reason: `"${live.row.session.title}" is open in Claude Code; close it there first.` };
+  const running = sessions.find((n) => n.row.session.status === "running");
+  if (running) return { ok: false, reason: `"${running.row.session.title}" is running; wait until it finishes.` };
   return { ok: true, machineId: target.machineId, cwd, sessions };
 }
