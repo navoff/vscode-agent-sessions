@@ -31,6 +31,8 @@ agents' own session stores instead and stays out of their way.
   summed up in one notification. The tray icon lists those sessions in its
   menu and gets a dot while any wait. The tray helper is used only in local
   windows; a Remote-SSH window shows VS Code messages.
+
+  ![The tray menu: the sessions that wait for you, each with its agent icon, and the tray icon with a dot](media/tray-menu.png)
 - **Opens in the native plugin.** Double-click a Claude session and it opens
   in the Claude Code extension; a Codex session opens in the Codex plugin,
   in its side bar or in an editor tab. "Resume in Terminal" prepares the CLI
@@ -248,7 +250,10 @@ Press F5 in VS Code to run the extension in an Extension Development Host.
 "Run Extension (demo data)" launch configuration starts a development host on
 that data with other extensions disabled and opens the view. `npm run
 demo:touch` appends fresh activity to two sessions so that unread marks
-appear. The screenshot above was taken this way.
+appear. The screenshot above was taken this way. `npm run demo:tray` draws
+the tray menu picture (`media/tray-menu.svg` and, with inkscape, `.png`)
+from a fixed session list: the real menu belongs to the desktop and cannot
+be opened by a script.
 
 ## Credits
 

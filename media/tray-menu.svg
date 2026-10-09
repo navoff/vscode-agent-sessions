@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="420" height="201" viewBox="0 0 420 201">
+  <style>
+    .label { font: 13px "Noto Sans", "DejaVu Sans", Ubuntu, sans-serif; fill: #e8e8e8; }
+    .clock { font: 13px "Noto Sans", "DejaVu Sans", Ubuntu, sans-serif; fill: #d0d0d0; }
+  </style>
+  <rect width="420" height="201" fill="#1e1e1e"/>
+  <rect x="0" y="161" width="420" height="40" fill="#2a2a2a"/>
+  <text x="408" y="186" text-anchor="end" class="clock">13:13</text>
+  
+  <g transform="translate(326,170)">
+    <rect x="2" y="4" width="18" height="12" fill="#e6e6e6"/>
+    <rect x="4" y="6" width="14" height="8" fill="#2a2a2a"/>
+    <rect x="6" y="8" width="5" height="1" fill="#e6e6e6"/>
+    <rect x="6" y="11" width="8" height="1" fill="#e6e6e6"/>
+    <rect x="10" y="16" width="2" height="3" fill="#e6e6e6"/>
+    <rect x="6" y="19" width="10" height="2" fill="#e6e6e6"/>
+    <circle cx="17" cy="5" r="5" fill="#0d1117"/>
+    <circle cx="17" cy="5" r="4" fill="#3fb950"/>
+  </g>
+  <rect x="8" y="0" width="400" height="157" rx="4" fill="#333333" stroke="#1a1a1a"/>
+  
+  <g transform="translate(8,6)">
+    <image x="14" y="7" width="20" height="20" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAB2HAAAdhwGP5fFlAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAAAnJJREFUWIXllt1LFFEYh58zszPux8C2UbaE1qSLq2V0EwYJoRBqJXRv91k3QZf9C/0HdtNVQXQT9LEQURD0gRCopZatlWSRVhC2i+549HQx7q7bas2uOhf1wsB8nPP+nvm975w58L+H+P1Gh20HwyHZj6APOABENqiRBV4B15UTHEil07l1Abpad9cHlHYXxcENiq4XwyqgelMjn6bLADpsOxiOyMEtFC9COMEjeSe0/N1QaPGcD+IAhzRz4Wz+ogAghOjzQRwABWfKAaDFLwDhNncpgALLL4DVWtqfBvoRgWon9rcFadvjTr8xkuP+xGJVeapyIGJCd9IgbmnELY3TLTVViVcN0NFgUKMX1zA7ptFcq/sH0JVw33h0dol5qQA40WT6A7AvppPY4U5LvXF4OuXW/phtYJllv5bNB+hJGgAsSMXzKcmDtxIAMwCdDcbWApi6W3+AJx8k81LxckbyJbO8Ald5GSoCaN9btHnwo8QyBRFD8GzKdcGOabTsrOzLrmh0d1PR4kudoTXH9CQNxr9Kzzk9OxC3NFp3/Z230mb07EB30kCs5L14J8vnueWS5+12gAtHQ24zNhrcHnc85fXkgC4ExxvdBpv8vsTEtyUyjio5Hr1bJOu4a8KpZu9fgyeAw3U628Pu6z+cXLu+joTH7901oT6qe27GQrFO7q9TnmZsUtwbmxZQuiHJ+Kg/lz9ZvSEZ8xGgoLW6B675pa5EUavogBMcAIZ90B+yiF4pA0il0zkVUL1bDDGkSXpvjo4WFomSXUR65udcIlp7VdPlLBATsA2o7ke/EgIySvACwWVLRM/fej35YyP5/r34BWbYr9gwlr+VAAAAAElFTkSuQmCC"/>
+    <text x="44" y="22" class="label">Investigate flaky payment tests · This machine</text>
+  </g>
+  <g transform="translate(8,40)">
+    <image x="14" y="7" width="20" height="20" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAB2HAAAdhwGP5fFlAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAAAsNJREFUWIXllj9IG1EYwH8vOaNg4FIEQSQgOAUtRUQUB8kW/EPIbPYmBQcHo4ODk4MdxMXBLpnaRXArERQX/xeqBpqCiygkDp0uIUEvXnwdbM60sZpLNEP7Te/e9+77/fje8d7B/x7izwmv19uk63pICDEupewSQjTXApBS5oBvQohPqqquxGIx/a8CQ0NDbsMwPgOva4E+EvFCoTB2eHiYLBPwer1N+Xz+ywvCTQlVVfuLnbAVZ3VdD9cBDvAmnU6/LT6YAkKI8TrAAZBSBssEAE+9BIQQXQ8JOOslUMqyPbbqqXA4HKiqSkNDQ9U1FMsvKAqBQAC/309nZycAhmEQj8eJRqMcHx+/nEBjYyMLCwv09fWVSfX29tLT08P8/Dzr6+sV17S0BRMTEyZ8f3+fyclJgsEgS0tLXF1dYbPZmJ6epqWlpeKaFXegtbUVv98PwO7uLjMzM0gpATg/PyeXyzE7O0sul8Pj8bCzs/O8AgMDAyjK3fK1tTUTXoyNjQ0SiQQXFxeVlgQsbEHxgwNIJpNl+ZubG8twSwLNzfeXoqZplkE1C+j6/S3qcrnqL5BKpcxxW1tbWd7pdBKJROjv77d0MFUscHBwYI6Hh4fL8iMjIwQCARYXF/H5fM8vcHZ2xvb2NgA+n49IJILb7cbpdDI6Oko4HAYgk8mwublZsYD5QzI4OCgfWwh3e7+8vExHR8eD+dvbW+bm5tja2noSvLe3J8DiSahpGqFQiNXVVbLZ7G+509NTpqamKoKXhqUOlIaiKLS3t2O327m8vOT6+toSuNiB0pMwi4V/AsMwqjp4fkWmOCjdgu/VVqsiTFapwMd60YUQJssUUFV1BYjXgX+iadqHMoFYLKYXCoWxF5Y4kVKOJRKJfHHCXppNpVKZ7u7uqK7rP4BXgAtw1AjNAl+FEO/T6fS7o6Oj57vJ/on4CXFq9AC2zGN/AAAAAElFTkSuQmCC"/>
+    <text x="44" y="22" class="label">Dark mode for the settings screen · This machine</text>
+  </g>
+  <g transform="translate(8,74)">
+    <image x="14" y="7" width="20" height="20" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAB2HAAAdhwGP5fFlAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAAAnJJREFUWIXllt1LFFEYh58zszPux8C2UbaE1qSLq2V0EwYJoRBqJXRv91k3QZf9C/0HdtNVQXQT9LEQURD0gRCopZatlWSRVhC2i+549HQx7q7bas2uOhf1wsB8nPP+nvm975w58L+H+P1Gh20HwyHZj6APOABENqiRBV4B15UTHEil07l1Abpad9cHlHYXxcENiq4XwyqgelMjn6bLADpsOxiOyMEtFC9COMEjeSe0/N1QaPGcD+IAhzRz4Wz+ogAghOjzQRwABWfKAaDFLwDhNncpgALLL4DVWtqfBvoRgWon9rcFadvjTr8xkuP+xGJVeapyIGJCd9IgbmnELY3TLTVViVcN0NFgUKMX1zA7ptFcq/sH0JVw33h0dol5qQA40WT6A7AvppPY4U5LvXF4OuXW/phtYJllv5bNB+hJGgAsSMXzKcmDtxIAMwCdDcbWApi6W3+AJx8k81LxckbyJbO8Ald5GSoCaN9btHnwo8QyBRFD8GzKdcGOabTsrOzLrmh0d1PR4kudoTXH9CQNxr9Kzzk9OxC3NFp3/Z230mb07EB30kCs5L14J8vnueWS5+12gAtHQ24zNhrcHnc85fXkgC4ExxvdBpv8vsTEtyUyjio5Hr1bJOu4a8KpZu9fgyeAw3U628Pu6z+cXLu+joTH7901oT6qe27GQrFO7q9TnmZsUtwbmxZQuiHJ+Kg/lz9ZvSEZ8xGgoLW6B675pa5EUavogBMcAIZ90B+yiF4pA0il0zkVUL1bDDGkSXpvjo4WFomSXUR65udcIlp7VdPlLBATsA2o7ke/EgIySvACwWVLRM/fej35YyP5/r34BWbYr9gwlr+VAAAAAElFTkSuQmCC"/>
+    <text x="44" y="22" class="label">Migrate orders table to UUID keys · hetzner</text>
+  </g>
+  <line x1="16" y1="112.5" x2="400" y2="112.5" stroke="#222222"/>
+  <text x="52" y="139" class="label">About</text>
+</svg>

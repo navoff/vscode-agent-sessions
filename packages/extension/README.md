@@ -31,6 +31,8 @@ agents' own session stores instead and stays out of their way.
   summed up in one notification. The tray icon lists those sessions in its
   menu and gets a dot while any wait. The tray helper is used only in local
   windows; a Remote-SSH window shows VS Code messages.
+
+  ![The tray menu: the sessions that wait for you, each with its agent icon, and the tray icon with a dot](https://raw.githubusercontent.com/navoff/vscode-agent-sessions/main/media/tray-menu.png)
 - **Opens in the native plugin.** Double-click a Claude session and it opens
   in the Claude Code extension; a Codex session opens in the Codex plugin,
   in its side bar or in an editor tab. "Resume in Terminal" prepares the CLI
