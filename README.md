@@ -11,6 +11,8 @@ agents' own session stores instead and stays out of their way.
 
 ![The Agent Sessions view: sessions of two agents grouped by machine and project, with running and unread marks](media/screenshot.png)
 
+![The tray menu: the sessions that wait for you, each with its agent icon, and the tray icon with a dot](media/tray-menu.png)
+
 ## Features
 
 - **One tree for every agent.** Sessions are grouped by machine and project.
@@ -31,8 +33,6 @@ agents' own session stores instead and stays out of their way.
   summed up in one notification. The tray icon lists those sessions in its
   menu and gets a dot while any wait. The tray helper is used only in local
   windows; a Remote-SSH window shows VS Code messages.
-
-  ![The tray menu: the sessions that wait for you, each with its agent icon, and the tray icon with a dot](media/tray-menu.png)
 - **Opens in the native plugin.** Double-click a Claude session and it opens
   in the Claude Code extension; a Codex session opens in the Codex plugin,
   in its side bar or in an editor tab. "Resume in Terminal" prepares the CLI
