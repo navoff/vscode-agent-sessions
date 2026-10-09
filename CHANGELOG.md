@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- A Claude Code session of a folder that is not the first one of a
+  multi-root workspace no longer opens as an empty conversation in that
+  window. Claude Code runs in the first folder only, so such a session now
+  gets the "Open Folder in New Window" / "Resume in Terminal" offer, and a
+  notification or tray click opens it in a window whose first folder is
+  the session folder, or a new one. "New Session…" on such a folder also
+  starts in a new window on it.
+
 ## 0.2.0 - 2026-10-09
 
 - Sessions that finished work and wait for the user are counted on the

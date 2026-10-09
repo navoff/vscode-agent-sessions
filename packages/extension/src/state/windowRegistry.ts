@@ -64,9 +64,10 @@ export interface FindWindowOptions {
 }
 
 /**
- * The live window that has `cwd` as one of its folders. A multi-root window
- * wins over a single-folder one, then the most recently updated record.
- * Records of dead windows are deleted on the way.
+ * The live window that has `cwd` as its first folder, the one Claude Code
+ * runs in; the other folders of a multi-root window do not count. A
+ * multi-root window wins over a single-folder one, then the most recently
+ * updated record. Records of dead windows are deleted on the way.
  */
 export async function findWindowForFolder(dir: string, cwd: string, opts: FindWindowOptions): Promise<WindowRecord | undefined> {
   let names: string[];
@@ -89,12 +90,8 @@ export async function findWindowForFolder(dir: string, cwd: string, opts: FindWi
       continue;
     }
     if (opts.now - record.updatedAt > WINDOW_RECORD_MAX_AGE_MS) continue;
-    for (const f of record.folders) {
-      if ((await opts.canonical(f)) === target) {
-        matches.push(record);
-        break;
-      }
-    }
+    const first = record.folders[0];
+    if (first !== undefined && (await opts.canonical(first)) === target) matches.push(record);
   }
   matches.sort((a, b) => Number(!!b.workspaceFile) - Number(!!a.workspaceFile) || b.updatedAt - a.updatedAt || a.pid - b.pid);
   return matches[0];

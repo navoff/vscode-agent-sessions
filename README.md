@@ -78,7 +78,7 @@ agents' own session stores instead and stays out of their way.
 | Action | How |
 | --- | --- |
 | Open a session | Double-click it (or single-click with `agentSessions.openOn` set to `singleClick`). "Open Session" in the context menu always opens immediately. |
-| Open a Claude session of another folder | Claude Code finds only sessions of the folder open in its window and its git worktrees, so such a session offers "Open Folder in New Window", which then opens the session there, or "Resume in Terminal". |
+| Open a Claude session of another folder | Claude Code finds only sessions of the folder open in its window (the first folder of a multi-root workspace) and its git worktrees, so such a session offers "Open Folder in New Window", which then opens the session there, or "Resume in Terminal". |
 | Open a remote session | Double-click opens a Remote-SSH window on the session folder of that machine (or focuses the one already open) and opens the session there. The machine's daemon must speak the current protocol; run **Prepare Machine** after updating the extension. |
 | Resume in a terminal | "Resume in Terminal" opens a terminal in the session folder with `claude --resume <id>` or `codex resume <id>` typed in, not run. |
 | Start a new session | The plus button that appears on a folder under the pointer, or "New Session…" in its context menu, asks for the agent, Claude Code or Codex, and starts a session in that folder: in this window when the folder is open in it, otherwise in a new window on the folder, a Remote-SSH one for a remote machine. |
@@ -127,9 +127,10 @@ reloaded.
 
 ### Moving sessions to another folder
 
-Claude Code opens only the sessions of the folder open in its window. A
-Claude Code session can be moved to another folder of its machine instead
-of opening a window on its own folder; it also works for remote machines.
+Claude Code opens only the sessions of the folder open in its window, the
+first folder of a multi-root workspace. A Claude Code session can be moved
+to another folder of its machine instead of opening a window on its own
+folder; it also works for remote machines.
 The move is done the way Claude Code does it when the working directory of
 a session changes: the session file and its directory of subagent
 transcripts and tool results go to the project folder of the new directory

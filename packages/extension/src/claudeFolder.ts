@@ -4,10 +4,12 @@ import type { AgentKind, SessionInfo } from "@agent-sessions/core";
 import type { PendingOpen } from "@agent-sessions/daemon";
 
 /**
- * The Claude Code extension looks a session up only in the project folders
- * of the window folder and of its git worktrees; any other id opens as an
- * empty conversation. These helpers decide whether a session is reachable
- * and hand an unreachable one over to a window opened on its folder.
+ * The Claude Code extension runs Claude in the first window folder and looks
+ * a session up only in the project folders of that folder and of its git
+ * worktrees; any other id opens as an empty conversation. The other folders
+ * of a multi-root window do not count. These helpers decide whether a
+ * session is reachable and hand an unreachable one over to a window opened
+ * on its folder.
  */
 
 /** `path` with symlinks resolved and no trailing slash; `path` itself when it does not exist. */
@@ -26,15 +28,15 @@ export function gitWorktrees(dir: string): Promise<string[]> {
   });
 }
 
-/** Whether Claude Code in a window on `folders` finds a session started in `cwd`. */
+/** Whether Claude Code in a window on `folders` finds a session started in `cwd`: only the first folder counts. */
 export async function claudeFindsSession(cwd: string, folders: readonly string[], worktrees = gitWorktrees): Promise<boolean> {
   // Without a cwd there is nothing to compare; let Claude Code try.
   if (!cwd) return true;
+  const folder = folders[0];
+  if (folder === undefined) return false;
   const target = await canonical(cwd);
-  for (const folder of folders) {
-    if ((await canonical(folder)) === target) return true;
-    for (const w of await worktrees(folder)) if ((await canonical(w)) === target) return true;
-  }
+  if ((await canonical(folder)) === target) return true;
+  for (const w of await worktrees(folder)) if ((await canonical(w)) === target) return true;
   return false;
 }
 
@@ -52,12 +54,10 @@ export async function pendingSessionFor(pending: PendingOpen | undefined, folder
   return (await isWindowFolder(pending.session.cwd, folders)) ? pending.session : undefined;
 }
 
-/** Whether `cwd` is one of the window folders. Git worktrees do not count. */
+/** Whether `cwd` is the first window folder, the one Claude Code runs in. Git worktrees do not count. */
 export async function isWindowFolder(cwd: string, folders: readonly string[]): Promise<boolean> {
-  if (!cwd) return false;
-  const target = await canonical(cwd);
-  for (const f of folders) if ((await canonical(f)) === target) return true;
-  return false;
+  if (!cwd || folders.length === 0) return false;
+  return (await canonical(folders[0])) === (await canonical(cwd));
 }
 
 /**

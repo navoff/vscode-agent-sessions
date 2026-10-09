@@ -21,16 +21,16 @@ const opts = (alive: readonly number[] = [], canonical = async (p: string) => p)
   now: NOW,
 });
 
-test("a written record is found by one of its folders", () =>
+test("a written record is found by its first folder", () =>
   withDir(async (_root, dir) => {
     const record: WindowRecord = { pid: 11, folders: ["/a", "/b"], updatedAt: NOW };
     await writeWindowRecord(dir, record);
     assert.deepEqual(await readdir(dir), ["11.json"]);
-    assert.deepEqual(await findWindowForFolder(dir, "/b", opts([11])), record);
+    assert.deepEqual(await findWindowForFolder(dir, "/a", opts([11])), record);
     assert.equal(await findWindowForFolder(dir, "/c", opts([11])), undefined);
     await removeWindowRecord(dir, 11);
     await removeWindowRecord(dir, 11);
-    assert.equal(await findWindowForFolder(dir, "/b", opts([11])), undefined);
+    assert.equal(await findWindowForFolder(dir, "/a", opts([11])), undefined);
   }));
 
 test("a record of a dead window is deleted and skipped", () =>
@@ -59,6 +59,12 @@ test("a multi-root window wins over a newer single-folder one", () =>
     assert.equal(windowRecordTarget(found!, "/a"), "/w/new.code-workspace");
     const single = await findWindowForFolder(dir, "/a", opts([11]));
     assert.equal(windowRecordTarget(single!, "/a"), "/a");
+  }));
+
+test("a window whose first folder is another one does not count, as Claude Code runs in the first folder", () =>
+  withDir(async (_root, dir) => {
+    await writeWindowRecord(dir, { pid: 12, workspaceFile: "/w/old.code-workspace", folders: ["/x", "/a"], updatedAt: NOW });
+    assert.equal(await findWindowForFolder(dir, "/a", opts([12])), undefined);
   }));
 
 test("folders compare by their canonical paths", () =>

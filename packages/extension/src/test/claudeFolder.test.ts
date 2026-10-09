@@ -29,6 +29,15 @@ test("finds a session of a git worktree of a window folder", async () => {
   assert.equal(await claudeFindsSession("/tmp/wt", ["/w"], worktrees), true);
 });
 
+test("in a multi-root window only the first folder counts, as Claude Code runs in it", async () => {
+  const worktrees = async (dir: string) => (dir === "/second" ? ["/second", "/tmp/wt2"] : []);
+  assert.equal(await claudeFindsSession("/second", ["/first", "/second"], worktrees), false);
+  assert.equal(await claudeFindsSession("/tmp/wt2", ["/first", "/second"], worktrees), false);
+  assert.equal(await claudeFindsSession("/first", ["/first", "/second"], worktrees), true);
+  assert.equal(await isWindowFolder("/second", ["/first", "/second"]), false);
+  assert.equal(await isWindowFolder("/first", ["/first", "/second"]), true);
+});
+
 test("lets Claude Code try when the cwd is unknown", async () => {
   assert.equal(await claudeFindsSession("", ["/w"], noWorktrees), true);
 });
