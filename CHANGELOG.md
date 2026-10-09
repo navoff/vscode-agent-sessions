@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-10-09
 
 - Sessions that finished work and wait for the user are counted on the
   Agent Sessions icon in the activity bar and announced once each: on Linux
