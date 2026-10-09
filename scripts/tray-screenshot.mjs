@@ -23,21 +23,25 @@ const sessions = [
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const iconData = (agent) => `data:image/png;base64,${readFileSync(join(iconsDir, `${agent}.png`)).toString("base64")}`;
 
-// Geometry, in px at 1x; the PNG is rendered at 2x.
-const W = 420;
+// Geometry, in px at 1x; the PNG is rendered at 1.5x. Empty screen to the
+// left of and above the menu shows that this is the bottom right corner.
 const ROW = 34;
 const PAD = 6;
 const SEP = 9;
-const menuH = PAD + sessions.length * ROW + SEP + ROW + PAD;
 const PANEL = 40;
 const GAP = 4;
-const H = menuH + GAP + PANEL;
-const menuX = W - 12 - 300 - 100;
-const menuW = 300 + 100;
+const LEFT = 110;
+const TOP = 70;
+const menuW = 352;
+const menuX = LEFT;
+const menuY = TOP;
+const menuH = PAD + sessions.length * ROW + SEP + ROW + PAD;
+const W = LEFT + menuW + 12;
+const H = TOP + menuH + GAP + PANEL;
 
 const rows = sessions
   .map((s, i) => {
-    const y = PAD + i * ROW;
+    const y = menuY + PAD + i * ROW;
     return `
   <g transform="translate(${menuX},${y})">
     <image x="14" y="${(ROW - 20) / 2}" width="20" height="20" xlink:href="${iconData(s.agent)}"/>
@@ -46,12 +50,12 @@ const rows = sessions
   })
   .join("");
 
-const sepY = PAD + sessions.length * ROW + SEP / 2;
-const aboutY = PAD + sessions.length * ROW + SEP;
+const sepY = menuY + PAD + sessions.length * ROW + SEP / 2;
+const aboutY = menuY + PAD + sessions.length * ROW + SEP;
 
 // The tray icon as packages/tray/icon.go draws it, with the dot.
 const iconX = W - 12 - 22 - 60;
-const iconY = menuH + GAP + (PANEL - 22) / 2;
+const iconY = menuY + menuH + GAP + (PANEL - 22) / 2;
 const trayIcon = `
   <g transform="translate(${iconX},${iconY})">
     <rect x="2" y="4" width="18" height="12" fill="#e6e6e6"/>
@@ -70,10 +74,10 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.
     .clock { font: 13px "Noto Sans", "DejaVu Sans", Ubuntu, sans-serif; fill: #d0d0d0; }
   </style>
   <rect width="${W}" height="${H}" fill="#1e1e1e"/>
-  <rect x="0" y="${menuH + GAP}" width="${W}" height="${PANEL}" fill="#2a2a2a"/>
-  <text x="${W - 12}" y="${menuH + GAP + PANEL / 2 + 5}" text-anchor="end" class="clock">13:13</text>
+  <rect x="0" y="${menuY + menuH + GAP}" width="${W}" height="${PANEL}" fill="#2a2a2a"/>
+  <text x="${W - 12}" y="${menuY + menuH + GAP + PANEL / 2 + 5}" text-anchor="end" class="clock">13:13</text>
   ${trayIcon}
-  <rect x="${menuX}" y="0" width="${menuW}" height="${menuH}" rx="4" fill="#333333" stroke="#1a1a1a"/>
+  <rect x="${menuX}" y="${menuY}" width="${menuW}" height="${menuH}" rx="4" fill="#333333" stroke="#1a1a1a"/>
   ${rows}
   <line x1="${menuX + 8}" y1="${sepY}" x2="${menuX + menuW - 8}" y2="${sepY}" stroke="#222222"/>
   <text x="${menuX + 44}" y="${aboutY + ROW / 2 + 5}" class="label">About</text>
@@ -87,7 +91,7 @@ console.log(`wrote ${svgPath}`);
 
 const pngPath = join(outDir, "tray-menu.png");
 try {
-  execFileSync("inkscape", ["--export-type=png", `--export-width=${W * 2}`, `--export-filename=${pngPath}`, svgPath], { stdio: ["ignore", "ignore", "inherit"] });
+  execFileSync("inkscape", ["--export-type=png", `--export-width=${Math.round(W * 1.5)}`, `--export-filename=${pngPath}`, svgPath], { stdio: ["ignore", "ignore", "inherit"] });
   console.log(`wrote ${pngPath}`);
 } catch (err) {
   console.warn(`tray-screenshot: inkscape failed or is missing (${err.message}); only the SVG was written`);
