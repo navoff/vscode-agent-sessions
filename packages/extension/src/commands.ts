@@ -7,6 +7,8 @@ import type { ProjectNode, SessionNode, TreeNode } from "./tree/treeModel.js";
 import { selectionTargets } from "./tree/selection.js";
 import { DoubleClickDetector } from "./tree/clickDetector.js";
 import { claudeFindsSession, isDirectory, isWindowFolder, newSessionRequest, remoteFolderUri } from "./claudeFolder.js";
+import { codexTabSessionId } from "./state/viewedSession.js";
+import { windowRecordTarget, type WindowRecord } from "./state/windowRegistry.js";
 
 export type { FilterState };
 
@@ -25,6 +27,8 @@ export interface CommandDeps {
   selection(): readonly TreeNode[];
   /** Records a session on its machine for a window on its folder to open. */
   pendingOpen(machineId: string, session: SessionInfo): Promise<void>;
+  /** The local window that has `cwd` as one of its folders, if any. */
+  windowFor(cwd: string): Promise<WindowRecord | undefined>;
   /** The ssh host of a remote machine, undefined for the local one. */
   sshHost(machineId: string): string | undefined;
   log: vscode.OutputChannel;
@@ -51,7 +55,25 @@ export function codexConversationUri(sessionId: string): vscode.Uri {
   return vscode.Uri.file(`/local/${sessionId}`).with({ scheme: "openai-codex", authority: "route" });
 }
 
+/** The editor tab already showing the Codex session, if any. */
+function codexTabOf(sessionId: string): vscode.Tab | undefined {
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      const input = tab.input;
+      if (input instanceof vscode.TabInputCustom && input.viewType === CODEX_EDITOR_VIEW_TYPE && input.uri.scheme === "openai-codex" && codexTabSessionId(input.uri.path) === sessionId) return tab;
+    }
+  }
+  return undefined;
+}
+
 async function openCodexThread(sessionId: string): Promise<void> {
+  // A tab that already shows the session is brought forward instead of
+  // asking Codex, which would open the session in another tab.
+  const open = codexTabOf(sessionId);
+  if (open && open.input instanceof vscode.TabInputCustom) {
+    await vscode.commands.executeCommand("vscode.openWith", open.input.uri, open.input.viewType, { viewColumn: open.group.viewColumn, preview: false, preserveFocus: false });
+    return;
+  }
   const target = vscode.workspace.getConfiguration("agentSessions").get<string>("codex.openTarget", "sidebar");
   if (target === "panel") {
     await vscode.commands.executeCommand("vscode.openWith", codexConversationUri(sessionId), CODEX_EDITOR_VIEW_TYPE, {
@@ -133,6 +155,27 @@ export async function confirmAndMoveSessions(deps: CommandDeps, machineId: strin
 }
 
 /**
+ * Hands a local session over to the window that has its folder open, bringing
+ * that window to the front, or to a new window on the folder when none has it.
+ * Either window opens the session once it is focused or activated.
+ */
+export async function handOverToWindow(deps: CommandDeps, session: SessionInfo): Promise<"handed" | "failed"> {
+  try {
+    await deps.pendingOpen("local", session);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Cannot hand the session over: ${err instanceof Error ? err.message : String(err)}`);
+    return "failed";
+  }
+  const win = await deps.windowFor(session.cwd).catch((err) => {
+    deps.log.appendLine(`[local] looking up the window of ${session.cwd} failed: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  });
+  const target = win ? windowRecordTarget(win, session.cwd) : session.cwd;
+  await vscode.commands.executeCommand("vscode.openFolder", localFolderUri(target), { forceNewWindow: true });
+  return "handed";
+}
+
+/**
  * Claude Code opens a session of another folder as an empty conversation, so
  * offer to open that folder in a new window, which then opens the session,
  * or to move the session to the folder of this window.
@@ -153,13 +196,7 @@ async function offerClaudeFolder(deps: CommandDeps, session: SessionInfo): Promi
   if (here && move && pick === move) {
     await moveSessions(deps, "local", [session], here);
   } else if (pick === newWindow) {
-    try {
-      await deps.pendingOpen("local", session);
-    } catch (err) {
-      void vscode.window.showErrorMessage(`Cannot hand the session over: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-    await vscode.commands.executeCommand("vscode.openFolder", localFolderUri(session.cwd), { forceNewWindow: true });
+    await handOverToWindow(deps, session);
   } else if (pick === terminal) {
     resumeInTerminal(session);
   }
@@ -187,13 +224,27 @@ async function openRemoteSession(deps: CommandDeps, machineId: string, session: 
   deps.refresh();
 }
 
-export async function openSession(deps: CommandDeps, machineId: string, session: SessionInfo): Promise<void> {
+export interface OpenSessionOptions {
+  /**
+   * A local Claude session of a folder this window does not have goes
+   * straight to the window that has it, or to a new one, without asking.
+   */
+  autoHandOver?: boolean;
+}
+
+export async function openSession(deps: CommandDeps, machineId: string, session: SessionInfo, opts?: OpenSessionOptions): Promise<void> {
   if (machineId !== "local") return openRemoteSession(deps, machineId, session);
   if (!checkSessionId(session.id)) return;
   if (session.agent === "claude") {
     if (!vscode.extensions.getExtension(CLAUDE_EXTENSION) && !(await offerInstall(CLAUDE_EXTENSION, "Claude Code"))) return;
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-    if (!(await claudeFindsSession(session.cwd, folders))) return offerClaudeFolder(deps, session);
+    if (!(await claudeFindsSession(session.cwd, folders))) {
+      if (opts?.autoHandOver && (await isDirectory(session.cwd))) {
+        await handOverToWindow(deps, session);
+        return;
+      }
+      return offerClaudeFolder(deps, session);
+    }
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
     if (!vscode.extensions.getExtension(CODEX_EXTENSION) && !(await offerInstall(CODEX_EXTENSION, "Codex"))) return;

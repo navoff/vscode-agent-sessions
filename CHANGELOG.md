@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Sessions that finished work and wait for the user are counted on the
+  Agent Sessions icon in the activity bar and announced once each: on Linux
+  with a system notification from a new tray helper, whose icon lists those
+  sessions and gets a dot while any wait; elsewhere with a VS Code message
+  with an "Open" button. Several sessions that finish at once are summed up
+  in one notification. The tray helper is used only in local windows, not in
+  Remote-SSH ones. Settings `agentSessions.notifications` and
+  `agentSessions.tray` turn them off. A click in the tray menu or on a
+  notification opens a Claude Code session in the window that has its folder
+  open, bringing that window to the front, or in a new window on the folder
+  when none has it.
 - The folder of the window's workspace stays in the tree, first, even with
   no sessions, with all its sessions hidden or with the folder hidden: the
   folder of the `.code-workspace` file, or the single open folder. The

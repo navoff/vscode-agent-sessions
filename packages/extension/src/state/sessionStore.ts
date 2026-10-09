@@ -52,8 +52,11 @@ export class SessionStore {
     this.marks.setLastSeen(markKey(machineId, session), now);
   }
 
+  /** Marks a session unread; the user did it on purpose, so it is not announced. */
   markUnread(machineId: string, session: SessionInfo): void {
-    this.marks.setLastSeen(markKey(machineId, session), session.updatedAt - 1);
+    const key = markKey(machineId, session);
+    this.marks.setLastSeen(key, session.updatedAt - 1);
+    this.marks.setLastNotified(key, session.updatedAt);
   }
 
   setHidden(machineId: string, session: SessionInfo, hidden: boolean): void {

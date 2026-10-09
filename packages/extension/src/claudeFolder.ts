@@ -10,7 +10,8 @@ import type { PendingOpen } from "@agent-sessions/daemon";
  * and hand an unreachable one over to a window opened on its folder.
  */
 
-async function canonical(path: string): Promise<string> {
+/** `path` with symlinks resolved and no trailing slash; `path` itself when it does not exist. */
+export async function canonical(path: string): Promise<string> {
   const p = await realpath(path).catch(() => path);
   return p.length > 1 ? p.replace(/\/+$/, "") : p;
 }

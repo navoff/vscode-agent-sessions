@@ -30,10 +30,11 @@
   ],
   "main": "./dist/extension.cjs",
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onUri"
   ],
   "scripts": {
-    "build": "tsc -p . && node scripts/gen-icons.mjs && node esbuild.mjs",
+    "build": "tsc -p . && node scripts/gen-icons.mjs && node esbuild.mjs && node scripts/build-tray.mjs",
     "test": "tsc -p . && node --test \"out/test/**/*.test.js\"",
     "package": "npm run build --prefix ../.. && vsce package --no-dependencies"
   },
@@ -533,6 +534,16 @@
           "type": "boolean",
           "default": false,
           "description": "Show hidden sessions in the tree."
+        },
+        "agentSessions.notifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when a session finishes work and waits for you: a system notification from the tray helper on Linux, a VS Code message otherwise. More than three at once are summed up in one notification."
+        },
+        "agentSessions.tray": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Agent Sessions icon in the system tray, with a dot and a menu of the sessions that need attention. Linux only, local windows only (not Remote-SSH)."
         },
         "agentSessions.openOn": {
           "type": "string",

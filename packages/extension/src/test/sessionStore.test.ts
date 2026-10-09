@@ -82,9 +82,11 @@ test("forget drops the hidden, pinned and last-seen marks of one session only", 
   store.setMachineSessions("hetzner", map(s("a")));
   store.setHidden("local", s("a"), true);
   store.setPinned("local", s("a"), true);
+  new SessionMarks(mem).setLastNotified("local/claude:a", 100);
   store.forget("local", s("a"));
   assert.equal(mem.get("hidden/local/claude:a"), undefined);
   assert.equal(mem.get("pinned/local/claude:a"), undefined);
+  assert.equal(mem.get("notified/local/claude:a"), undefined);
   assert.equal(mem.get("seen/local/claude:a"), undefined);
   assert.equal(mem.get("seen/local/claude:b"), 100);
   assert.equal(mem.get("seen/hetzner/claude:a"), 100);

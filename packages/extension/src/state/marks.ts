@@ -48,10 +48,30 @@ export class SessionMarks {
     void this.store.update(`seen/${key}`, ts);
   }
 
+  /** The updatedAt of a session the user was last notified about. */
+  lastNotified(key: string): number | undefined {
+    const v = this.store.get<number>(`notified/${key}`);
+    return typeof v === "number" ? v : undefined;
+  }
+
+  setLastNotified(key: string, ts: number): void {
+    void this.store.update(`notified/${key}`, ts);
+  }
+
+  /** Whether the sessions waiting at the first run were recorded as notified (see AttentionTracker.seedIfNeeded). */
+  isNotifySeeded(): boolean {
+    return this.store.get<boolean>("attention/seeded") === true;
+  }
+
+  setNotifySeeded(): void {
+    void this.store.update("attention/seeded", true);
+  }
+
   /** Drops every mark of a session, such as after it was deleted. */
   forget(key: string): void {
     void this.store.update(`hidden/${key}`, undefined);
     void this.store.update(`pinned/${key}`, undefined);
     void this.store.update(`seen/${key}`, undefined);
+    void this.store.update(`notified/${key}`, undefined);
   }
 }

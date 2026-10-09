@@ -23,6 +23,14 @@ agents' own session stores instead and stays out of their way.
   marked with `●`. Opening a session in Claude Code or Codex does not count
   as activity, so merely looking at old sessions keeps them read. A session
   whose tab is active in the focused window is read as it goes.
+- **Badge, notifications and a tray icon.** The number of sessions that
+  finished work and wait for you is shown on the Agent Sessions icon in the
+  activity bar, and each such session is announced once: on Linux with a
+  system notification from a small tray helper, elsewhere with a VS Code
+  message with an "Open" button; several sessions that finish at once are
+  summed up in one notification. The tray icon lists those sessions in its
+  menu and gets a dot while any wait. The tray helper is used only in local
+  windows; a Remote-SSH window shows VS Code messages.
 - **Opens in the native plugin.** Double-click a Claude session and it opens
   in the Claude Code extension; a Codex session opens in the Codex plugin,
   in its side bar or in an editor tab. "Resume in Terminal" prepares the CLI
@@ -48,6 +56,10 @@ agents' own session stores instead and stays out of their way.
 - For remote machines: ssh access that works without prompts
   (`BatchMode=yes`), and either Node 20+ on the host or the ability to
   download Node 22 from nodejs.org.
+- For the tray icon: Linux with a StatusNotifier host in the panel (GNOME
+  with the AppIndicator extension, KDE, Cinnamon, XFCE, MATE). The helper opens sessions through the `code` CLI of
+  the running VS Code (falling back to `xdg-open` with the `vscode` URL
+  scheme).
 
 ## Getting started
 
@@ -78,6 +90,7 @@ agents' own session stores instead and stays out of their way.
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |
+| See what waits for you | The badge on the Agent Sessions icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon; a click opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
 | Copy the id | "Copy Session ID". |
 
 ### Filter
@@ -193,7 +206,9 @@ at **Show Log**; the daemon's own log is `daemon.log` next to the socket.
 | `agentSessions.codex.openTarget` | `sidebar` | Open Codex sessions in the Codex side bar or in an editor `panel`. |
 | `agentSessions.showHidden` | `false` | Show hidden sessions in the tree. |
 | `agentSessions.autoConnectOnStartup` | `true` | Connect the local machine and machines marked `autoConnect` on startup. |
+| `agentSessions.notifications` | `true` | Announce a session that finished work and waits: a system notification on Linux with the tray helper, a VS Code message otherwise. More than three at once are summed up in one notification. |
 | `agentSessions.ssh.path` | `ssh` | The ssh binary used for remote machines. |
+| `agentSessions.tray` | `true` | Show the icon in the system tray. Linux only, local windows only (not Remote-SSH). |
 
 Machines are kept in `machines.json` under the extension's global storage;
 the file can be edited by hand (for example to set `"autoConnect": true`).
@@ -219,6 +234,9 @@ npm install
 npm run build
 npm test
 ```
+
+Building the tray helper needs Go 1.22 or newer; without Go the extension
+builds without a tray icon.
 
 Press F5 in VS Code to run the extension in an Extension Development Host.
 `npm run package -w agent-sessions` builds the `.vsix`.

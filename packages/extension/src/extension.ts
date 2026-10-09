@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { watch, type FSWatcher } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -12,11 +12,18 @@ import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, sto
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { CODEX_EDITOR_VIEW_TYPE, confirmAndMoveSessions, openSession, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
-import { claudeFindsSession, isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
+import { canonical, claudeFindsSession, isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
+import { findWindowForFolder, removeWindowRecord, writeWindowRecord } from "./state/windowRegistry.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
 import { SessionMarks } from "./state/marks.js";
+import { attentionBadge, attentionRows, attentionSnapshot, AttentionTracker, burstTitle, gainedAttention, notificationPlan, NOTIFY_SETTLE_MS, toastText } from "./state/attention.js";
+import { markKey } from "./state/marks.js";
+import { CLAIM_MAX_AGE_MS, claimNotification, pruneNotifyClaims } from "./tray/notifyClaim.js";
+import { registerUriHandler } from "./tray/uriHandler.js";
+import { TrayClient, trayBinaryPath, traySocketPath, vscodeCliPath } from "./tray/trayClient.js";
+import { nodeTrayIo } from "./tray/trayIo.js";
 import { SessionStore, type SessionRow } from "./state/sessionStore.js";
 import { parentPid } from "./state/processParent.js";
 import { codexTabSessionId, pickByElimination, pickViewed, tabCandidates, type AgentTab } from "./state/viewedSession.js";
@@ -35,6 +42,16 @@ const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
 declare const __DAEMON_VERSION__: string | undefined;
 const BUNDLED_DAEMON_VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : undefined;
 
+/** Whether process `pid` exists; EPERM means it does, under another user. */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const log = vscode.window.createOutputChannel("Agent Sessions");
   // The channel is registered for disposal at the end of activate(), after the
@@ -47,7 +64,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   };
 
-  const store = new SessionStore(new SessionMarks(context.globalState));
+  const marks = new SessionMarks(context.globalState);
+  const store = new SessionStore(marks);
+  const attention = new AttentionTracker(marks);
+  const claimsDir = join(context.globalStorageUri.fsPath, "notified");
+  const windowsDir = join(context.globalStorageUri.fsPath, "windows");
+  pruneNotifyClaims(claimsDir, Date.now(), CLAIM_MAX_AGE_MS).catch((err) => appendLog(`[attention] pruning old notification claims failed: ${String(err)}`));
+  let trayBinary = trayBinaryPath(context.extensionPath, process.platform, process.arch);
+  if (trayBinary !== undefined && !existsSync(trayBinary)) {
+    appendLog("[tray] tray helper binary missing, built without Go?");
+    trayBinary = undefined;
+  }
+  const tray = new TrayClient({
+    socketPath: traySocketPath(process.env, homedir()),
+    binaryPath: trayBinary,
+    ...nodeTrayIo(join(context.globalStorageUri.fsPath, "tray"), appendLog),
+    log: appendLog,
+  });
   const connections = new Map<string, MachineConnection>();
   const daemonPath = context.asAbsolutePath("dist/daemon.mjs");
   let bundledDaemonVersion: string | undefined;
@@ -113,7 +146,92 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const dragAndDropController = new SessionsDragAndDrop((plan) => confirmAndMoveSessions(sessionDeps, plan.machineId, plan.sessions.map((n) => n.row.session), plan.cwd));
   const treeView = vscode.window.createTreeView("agentSessions.view", { treeDataProvider: tree, showCollapseAll: true, canSelectMany: true, dragAndDropController });
   context.subscriptions.push(tree, treeView);
-  const refresh = () => tree.refresh();
+  // The agent icon of the tree, for the desktop notification; undefined when the build lacks it.
+  const agentIconPath = (agent: string): string | undefined => {
+    const p = join(context.extensionPath, "resources", `${agent}.svg`);
+    return existsSync(p) ? p : undefined;
+  };
+  const machineName = (id: string): string => (id === LOCAL_ID ? "This machine" : (machines.machines.find((m) => m.id === id)?.name ?? id));
+
+  // The badge, the tray and the notifications follow every tree refresh.
+  // Refreshes come in bursts (one per machine, one per mark), so they are
+  // coalesced; notifications wait NOTIFY_SETTLE_MS more, for the marks of
+  // other windows.
+  const currentAttention = () => attentionRows(new Map(store.machineIds().map((id) => [id, store.rows(id)])), (m, cwd) => store.isProjectHidden(m, cwd));
+  // The helper lives on this machine's desktop: a remote window would start it on the remote host.
+  const trayWanted = () => process.platform === "linux" && vscode.env.remoteName === undefined && cfg().get<boolean>("tray", true);
+  let attentionBefore = new Map<string, number>();
+  const showAttention = async (rows: SessionRow[]): Promise<void> => {
+    treeView.badge = attentionBadge(rows.length);
+    attentionBefore = attentionSnapshot(rows);
+    const trayOn = trayWanted();
+    tray.setEnabled(trayOn);
+    if (trayOn) {
+      await tray.setState({
+        scheme: vscode.env.uriScheme,
+        cli: vscodeCliPath(vscode.env.appRoot, vscode.env.uriScheme, existsSync),
+        sessions: rows.map((r) => ({ machine: r.machineId, machineName: machineName(r.machineId), agent: r.session.agent, id: r.session.id, title: r.session.title })),
+      });
+    }
+  };
+  const showSessionNotification = (r: SessionRow) => {
+    const where = `${machineName(r.machineId)} · ${r.session.cwd}`;
+    if (tray.notify({ title: r.session.title, body: where, session: { machine: r.machineId, agent: r.session.agent, id: r.session.id }, icon: agentIconPath(r.session.agent) })) return;
+    void vscode.window.showInformationMessage(toastText(r.session.title, where), "Open").then((pick) => {
+      if (pick === "Open") void openSession(sessionDeps, r.machineId, r.session);
+    });
+  };
+  const showSummaryNotification = (count: number) => {
+    if (tray.notify({ title: burstTitle(count), body: "" })) return;
+    void vscode.window.showInformationMessage(`Agent Sessions: ${burstTitle(count)}`, "Show").then((pick) => {
+      if (pick === "Show") void vscode.commands.executeCommand("agentSessions.view.focus");
+    });
+  };
+  // A failed claim (not "taken by another window") announces anyway: a
+  // duplicate is better than silence.
+  const claim = (r: SessionRow) =>
+    claimNotification(claimsDir, markKey(r.machineId, r.session), r.session.updatedAt).catch((err) => {
+      appendLog(`[attention] notification claim failed: ${String(err)}`);
+      return true;
+    });
+  const announce = async (): Promise<void> => {
+    if (disposed) return;
+    const rows = currentAttention();
+    await showAttention(rows);
+    if (disposed || attention.seedIfNeeded(rows)) return;
+    const candidates = attention.toNotify(rows);
+    if (candidates.length === 0 || !cfg().get<boolean>("notifications", true)) return;
+    const won = await Promise.all(candidates.map(claim));
+    const fresh = candidates.filter((_, i) => won[i]);
+    if (disposed) return;
+    const plan = notificationPlan(fresh);
+    if (plan.kind === "summary") showSummaryNotification(plan.count);
+    else plan.rows.forEach(showSessionNotification);
+  };
+  let notifyTimer: ReturnType<typeof setTimeout> | undefined;
+  const updateAttention = async (): Promise<void> => {
+    if (disposed) return;
+    const rows = currentAttention();
+    if (gainedAttention(attentionBefore, rows) && !notifyTimer) {
+      notifyTimer = setTimeout(() => {
+        notifyTimer = undefined;
+        announce().catch((err) => appendLog(`[attention] notifications failed: ${String(err)}`));
+      }, NOTIFY_SETTLE_MS);
+    }
+    await showAttention(rows);
+  };
+  let attentionTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleAttention = () => {
+    if (disposed || attentionTimer) return;
+    attentionTimer = setTimeout(() => {
+      attentionTimer = undefined;
+      updateAttention().catch((err) => appendLog(`[attention] update failed: ${String(err)}`));
+    }, 100);
+  };
+  const refresh = () => {
+    tree.refresh();
+    scheduleAttention();
+  };
 
   // A session whose tab is in front of the user in this focused window is
   // being read, so activity that arrives meanwhile, or that the user comes
@@ -470,13 +588,45 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return c ? c.pendingOpen(session) : Promise.reject(new Error("the machine is not connected"));
     },
     sshHost: (machineId) => machines.machines.find((m) => m.id === machineId)?.sshHost,
+    windowFor: async (cwd) => {
+      if (!windowRecordsWanted) return undefined;
+      return findWindowForFolder(windowsDir, cwd, { isAlive: pidAlive, canonical, now: Date.now() });
+    },
   };
   registerSessionCommands(context, sessionDeps);
+  registerUriHandler(context, {
+    openSession: async (machineId, agent, id) => {
+      const session = store.find(machineId, `${agent}:${id}`);
+      if (!session) {
+        void vscode.window.showInformationMessage("Agent Sessions: this session is not in the list of this window (its machine may be disconnected).");
+        return;
+      }
+      await openSession(sessionDeps, machineId, session, { autoHandOver: true });
+    },
+    log: appendLog,
+  });
 
   // A session, or a request for a new one, that another window handed over to
   // a window on its folder, through the pending-open file of this machine (see
   // daemon/pendingOpen.ts): this window, when it has just been opened or, if
   // it already existed, focused.
+  // This window's folders, for another window to hand a session of one of them
+  // over to this one (see state/windowRegistry.ts). A remote window's global
+  // storage is on the remote host, so only local windows take part.
+  const windowRecordsWanted = vscode.env.remoteName === undefined;
+  const recordWindow = () => {
+    if (!windowRecordsWanted || disposed) return;
+    const ws = vscode.workspace.workspaceFile;
+    writeWindowRecord(windowsDir, {
+      pid: process.pid,
+      workspaceFile: ws?.scheme === "file" ? ws.fsPath : undefined,
+      folders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+      updatedAt: Date.now(),
+    }).catch((err) => appendLog(`[windows] recording this window failed: ${String(err)}`));
+  };
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(recordWindow));
+  recordWindow();
+
   const openPendingSession = async () => {
     const pending = await readPendingOpen(homedir());
     if (!pending) return;
@@ -487,7 +637,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (isNewSessionRequest(session)) await startNewSession(session.agent);
     else await openSession(sessionDeps, LOCAL_ID, session);
   };
-  context.subscriptions.push(vscode.window.onDidChangeWindowState((s) => { if (s.focused) void openPendingSession(); }));
+  context.subscriptions.push(vscode.window.onDidChangeWindowState((s) => {
+    if (!s.focused) return;
+    recordWindow();
+    void openPendingSession();
+  }));
   void openPendingSession();
 
   registerMachineCommands(context, {
@@ -518,7 +672,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         refresh();
       }
     }),
-    { dispose: () => { disposed = true; if (reloadTimer) clearTimeout(reloadTimer); if (versionCheckTimer) clearTimeout(versionCheckTimer); machinesWatcher?.close(); for (const c of connections.values()) c.dispose(); } },
+    { dispose: () => { disposed = true; if (reloadTimer) clearTimeout(reloadTimer); if (versionCheckTimer) clearTimeout(versionCheckTimer); if (attentionTimer) clearTimeout(attentionTimer); if (notifyTimer) clearTimeout(notifyTimer); machinesWatcher?.close(); tray.dispose(); for (const c of connections.values()) c.dispose(); if (windowRecordsWanted) removeWindowRecord(windowsDir, process.pid).catch((err) => appendLog(`[windows] removing the record of this window failed: ${String(err)}`)); } },
     log,
   );
 
