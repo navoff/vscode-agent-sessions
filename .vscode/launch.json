@@ -18,9 +18,10 @@
         "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
         "--disable-extensions",
         "--user-data-dir=${workspaceFolder}/.demo/user-data",
-        "${workspaceFolder}"
+        "${workspaceFolder}/.demo/home/work/shop-backend"
       ],
       "env": {
+        "HOME": "${workspaceFolder}/.demo/home",
         "CLAUDE_CONFIG_DIR": "${workspaceFolder}/.demo/claude",
         "CODEX_HOME": "${workspaceFolder}/.demo/codex",
         "XDG_RUNTIME_DIR": "${workspaceFolder}/.demo/runtime",

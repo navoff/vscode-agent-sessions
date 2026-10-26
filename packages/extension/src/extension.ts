@@ -696,7 +696,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Demo mode (scripts/demo-data.mjs, "Run Extension (demo data)"): bring the
   // view up so a screenshot needs no clicks.
   if (process.env.AGENT_SESSIONS_DEMO === "1") {
-    void vscode.commands.executeCommand("workbench.view.extension.agentSessionsPanel");
+    void vscode.commands.executeCommand("agentSessions.view.focus");
   }
   if (cfg().get<boolean>("autoConnectOnStartup", true)) {
     connect(LOCAL_ID);

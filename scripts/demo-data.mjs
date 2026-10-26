@@ -7,8 +7,11 @@
 //                                             turn unread after the tree has seen them
 //
 // Point the extension at it with:
-//   CLAUDE_CONFIG_DIR=<dir>/claude CODEX_HOME=<dir>/codex XDG_RUNTIME_DIR=<dir>/runtime
-// The "Run Extension (demo data)" launch configuration does exactly that.
+//   HOME=<dir>/home CLAUDE_CONFIG_DIR=<dir>/claude CODEX_HOME=<dir>/codex XDG_RUNTIME_DIR=<dir>/runtime
+// The session folders live under <dir>/home, so with that HOME the tree shows
+// them as ~/work/..., and <dir>/home/work/shop-backend holds a few source
+// files to open as the workspace. The "Run Extension (demo data)" launch
+// configuration does exactly that.
 
 import { mkdirSync, rmSync, writeFileSync, appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -20,7 +23,7 @@ const dir = resolve(args.find((a) => !a.startsWith("--")) ?? ".demo");
 const claudeDir = join(dir, "claude");
 const codexDir = join(dir, "codex");
 
-const HOME = "/home/alex";
+const HOME = join(dir, "home");
 const now = Date.now();
 const minutes = (n) => now - n * 60_000;
 const hours = (n) => minutes(n * 60);
@@ -103,9 +106,27 @@ function writeCodex() {
   writeFileSync(join(codexDir, "session_index.jsonl"), index.join("\n") + "\n");
 }
 
+// The project folders of the sessions; shop-backend gets a few files so that
+// the Explorer has something to show above the sessions.
+function writeProjects() {
+  for (const cwd of new Set([...CLAUDE, ...CODEX].map((s) => s.cwd))) mkdirSync(cwd, { recursive: true });
+  const shop = join(HOME, "work", "shop-backend");
+  mkdirSync(join(shop, "src"), { recursive: true });
+  mkdirSync(join(shop, "test"), { recursive: true });
+  const files = {
+    "package.json": JSON.stringify({ name: "shop-backend", version: "3.4.1", private: true, scripts: { test: "vitest" } }, null, 2) + "\n",
+    "README.md": "# shop-backend\n\nOrders, carts and checkout.\n",
+    "src/cart.ts": "export function total(items: { price: number; qty: number }[]): number {\n  return items.reduce((sum, i) => sum + i.price * i.qty, 0);\n}\n",
+    "src/checkout.ts": "import { total } from \"./cart.js\";\n\nexport function checkout(items: { price: number; qty: number }[]): { amount: number } {\n  return { amount: total(items) };\n}\n",
+    "src/orders.ts": "export interface Order {\n  id: string;\n  amount: number;\n}\n",
+    "test/checkout.test.ts": "import { checkout } from \"../src/checkout.js\";\n\ntest(\"sums the cart\", () => {\n  expect(checkout([{ price: 2, qty: 3 }]).amount).toBe(6);\n});\n",
+  };
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(shop, name), text);
+}
+
 function writeExtensionState() {
   // A remote machine that is listed but not connected, so the tree shows the machine level.
-  const storage = join(dir, "user-data", "User", "globalStorage", "postnovvm.agent-sessions");
+  const storage = join(dir, "user-data", "User", "globalStorage", "navoff.vscode-agent-sessions");
   mkdirSync(storage, { recursive: true });
   writeFileSync(
     join(storage, "machines.json"),
@@ -144,10 +165,12 @@ if (touch) {
 } else {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "runtime"), { recursive: true });
+  writeProjects();
   writeClaude();
   writeCodex();
   writeExtensionState();
   console.log(`demo data written to ${dir}`);
+  console.log(`  HOME=${HOME}`);
   console.log(`  CLAUDE_CONFIG_DIR=${claudeDir}`);
   console.log(`  CODEX_HOME=${codexDir}`);
   console.log(`  XDG_RUNTIME_DIR=${join(dir, "runtime")}`);

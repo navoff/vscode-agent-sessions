@@ -39,20 +39,11 @@
     "package": "npm run build --prefix ../.. && vsce package --no-dependencies"
   },
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "agentSessionsPanel",
-          "title": "Agent Sessions",
-          "icon": "resources/view-icon.svg"
-        }
-      ]
-    },
     "views": {
-      "agentSessionsPanel": [
+      "explorer": [
         {
           "id": "agentSessions.view",
-          "name": "Sessions",
+          "name": "Agent Sessions",
           "icon": "resources/view-icon.svg"
         }
       ]

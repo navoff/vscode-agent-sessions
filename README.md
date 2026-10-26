@@ -1,15 +1,15 @@
 # Agent Sessions
 
-All your AI coding sessions in one VS Code side bar: Claude Code and Codex,
-on this machine and on remote machines over ssh, with live statuses, unread
-marks, and one-click resume in the agent's own plugin.
+All your AI coding sessions in the VS Code Explorer, under your files:
+Claude Code and Codex, on this machine and on remote machines over ssh, with
+live statuses, unread marks, and one-click resume in the agent's own plugin.
 
 VS Code's built-in "Chat Sessions" view only knows the agents that plug into
 it, does not tell Claude sessions from Codex ones, and opens Claude sessions
 in Copilot rather than in the Claude Code extension. Agent Sessions reads the
 agents' own session stores instead and stays out of their way.
 
-![The Agent Sessions view: sessions of two agents grouped by machine and project, with running and unread marks](media/screenshot.png)
+![The Explorer with the project files and, under them, the Agent Sessions section: sessions of two agents grouped by machine and project, with running and unread marks](media/screenshot.png)
 
 ![The tray menu: the sessions that wait for you, each with its agent icon and an "Open" / "Mark as read" submenu, "Mark all as read" under them, and the tray icon with a dot](media/tray-menu.png)
 
@@ -26,7 +26,7 @@ agents' own session stores instead and stays out of their way.
   as activity, so merely looking at old sessions keeps them read. A session
   whose tab is active in the focused window is read as it goes.
 - **Badge, notifications and a tray icon.** The number of sessions that
-  finished work and wait for you is shown on the Agent Sessions icon in the
+  finished work and wait for you is shown on the Explorer icon in the
   activity bar, and each such session is announced once: on Linux with a
   system notification from a small tray helper, elsewhere with a VS Code
   message with an "Open" button; several sessions that finish at once are
@@ -65,8 +65,11 @@ agents' own session stores instead and stays out of their way.
 
 ## Getting started
 
-1. Install the extension and reload the window. The **Agent Sessions** icon
-   appears in the activity bar.
+1. Install the extension and reload the window. An **Agent Sessions** section
+   appears in the Explorer under your files. If it is not there, right-click
+   the Explorer header: sections are switched on and off in that menu. The
+   section can be dragged into the activity bar or the bottom panel like any
+   other view; VS Code remembers where you put it.
 2. "This machine" connects on its own and lists the sessions found in
    `~/.claude` and `~/.codex`.
 3. To watch a remote machine, click **Add Machine** in the view header, pick
@@ -92,7 +95,7 @@ agents' own session stores instead and stays out of their way.
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |
-| See what waits for you | The badge on the Agent Sessions icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon, each session a submenu with "Open" and "Mark as read", plus "Mark all as read" under the list; "Open" opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
+| See what waits for you | The badge on the Explorer icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon, each session a submenu with "Open" and "Mark as read", plus "Mark all as read" under the list; "Open" opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
 | Copy the id | "Copy Session ID". |
 
 ### Filter
@@ -247,9 +250,12 @@ Press F5 in VS Code to run the extension in an Extension Development Host.
 ### Demo data and screenshots
 
 `npm run demo` writes fake Claude Code and Codex session stores to `.demo/`
-(git-ignored); nothing in `~/.claude` or `~/.codex` is touched. The
-"Run Extension (demo data)" launch configuration starts a development host on
-that data with other extensions disabled and opens the view. `npm run
+(git-ignored); nothing in `~/.claude` or `~/.codex` is touched. The session
+folders live under `.demo/home`, and `.demo/home/work/shop-backend` holds a
+few source files. The "Run Extension (demo data)" launch configuration starts
+a development host on that data with other extensions disabled, with
+`.demo/home` as the home directory and the shop-backend folder open, and
+focuses the view. `npm run
 demo:touch` appends fresh activity to two sessions so that unread marks
 appear. The screenshot above was taken this way. `npm run demo:tray` draws
 the tray menu picture (`media/tray-menu.svg` and, with inkscape, `.png`)

@@ -1,15 +1,15 @@
 # Agent Sessions
 
-All your AI coding sessions in one VS Code side bar: Claude Code and Codex,
-on this machine and on remote machines over ssh, with live statuses, unread
-marks, and one-click resume in the agent's own plugin.
+All your AI coding sessions in the VS Code Explorer, under your files:
+Claude Code and Codex, on this machine and on remote machines over ssh, with
+live statuses, unread marks, and one-click resume in the agent's own plugin.
 
 VS Code's built-in "Chat Sessions" view only knows the agents that plug into
 it, does not tell Claude sessions from Codex ones, and opens Claude sessions
 in Copilot rather than in the Claude Code extension. Agent Sessions reads the
 agents' own session stores instead and stays out of their way.
 
-![The Agent Sessions view: sessions of two agents grouped by machine and project, with running and unread marks](https://raw.githubusercontent.com/navoff/vscode-agent-sessions/main/media/screenshot.png)
+![The Explorer with the project files and, under them, the Agent Sessions section: sessions of two agents grouped by machine and project, with running and unread marks](https://raw.githubusercontent.com/navoff/vscode-agent-sessions/main/media/screenshot.png)
 
 ![The tray menu: the sessions that wait for you, each with its agent icon, and the tray icon with a dot](https://raw.githubusercontent.com/navoff/vscode-agent-sessions/main/media/tray-menu.png)
 
@@ -26,7 +26,7 @@ agents' own session stores instead and stays out of their way.
   as activity, so merely looking at old sessions keeps them read. A session
   whose tab is active in the focused window is read as it goes.
 - **Badge, notifications and a tray icon.** The number of sessions that
-  finished work and wait for you is shown on the Agent Sessions icon in the
+  finished work and wait for you is shown on the Explorer icon in the
   activity bar, and each such session is announced once: on Linux with a
   system notification from a small tray helper, elsewhere with a VS Code
   message with an "Open" button; several sessions that finish at once are
@@ -63,8 +63,11 @@ agents' own session stores instead and stays out of their way.
 
 ## Getting started
 
-1. Install the extension and reload the window. The **Agent Sessions** icon
-   appears in the activity bar.
+1. Install the extension and reload the window. An **Agent Sessions** section
+   appears in the Explorer under your files. If it is not there, right-click
+   the Explorer header: sections are switched on and off in that menu. The
+   section can be dragged into the activity bar or the bottom panel like any
+   other view; VS Code remembers where you put it.
 2. "This machine" connects on its own and lists the sessions found in
    `~/.claude` and `~/.codex`.
 3. To watch a remote machine, click **Add Machine** in the view header, pick
@@ -88,7 +91,7 @@ agents' own session stores instead and stays out of their way.
 | Order | Sessions in a folder go by creation time, newest first, with pinned ones above the rest. Activity does not move a session. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |
-| See what waits for you | The badge on the Agent Sessions icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon; a click opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
+| See what waits for you | The badge on the Explorer icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon; a click opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
 | Copy the id | "Copy Session ID". |
 
 ### Filter

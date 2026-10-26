@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The sessions view now lives in the Explorer, under the files of the
+  workspace, as the "Agent Sessions" section; the separate activity bar
+  icon is gone and the badge with the waiting sessions is shown on the
+  Explorer icon. The section can still be dragged elsewhere. If you had
+  dragged the "Folders" view into the old Agent Sessions container, run
+  "View: Reset View Locations" to get the standard layout back.
 - Each session in the tray menu is now a submenu with "Open" and "Mark as
   read", the latter clearing it without opening it, and "Mark all as read"
   under the list clears every waiting session at once.
