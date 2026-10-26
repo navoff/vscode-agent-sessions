@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-26
 
 - The sessions view now lives in the Explorer, under the files of the
   workspace, as the "Agent Sessions" section; the separate activity bar
