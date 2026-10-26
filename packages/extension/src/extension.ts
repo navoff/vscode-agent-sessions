@@ -603,6 +603,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       await openSession(sessionDeps, machineId, session, { autoHandOver: true });
     },
+    markRead: (machineId, agent, id) => {
+      const session = store.find(machineId, `${agent}:${id}`);
+      if (!session) {
+        appendLog(`[uri] cannot mark ${machineId} ${agent}:${id} read: not in this window's list`);
+        return;
+      }
+      store.markRead(machineId, session, Date.now());
+      refresh();
+    },
+    markAllRead: () => {
+      const now = Date.now();
+      for (const r of currentAttention()) store.markRead(r.machineId, r.session, now);
+      refresh();
+    },
     log: appendLog,
   });
 

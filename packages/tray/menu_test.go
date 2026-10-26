@@ -32,6 +32,20 @@ func TestSessionURICarriesBase64URLJSON(t *testing.T) {
 	}
 }
 
+func TestReadURIs(t *testing.T) {
+	s := Session{Machine: "my box", MachineName: "Box", Agent: "claude", ID: "a&b", Title: "T"}
+	// Same payload as the open URI, parsed by the extension's uriHandler.test.ts.
+	if got := readURI("vscode", s); got != "vscode://navoff.vscode-agent-sessions/read?s=eyJtYWNoaW5lIjoibXkgYm94IiwiYWdlbnQiOiJjbGF1ZGUiLCJpZCI6ImFcdTAwMjZiIn0" {
+		t.Fatal(got)
+	}
+	if got := readAllURI("vscodium"); got != "vscodium://navoff.vscode-agent-sessions/read-all" {
+		t.Fatal(got)
+	}
+	if got := readAllURI("bad scheme"); !strings.HasPrefix(got, "vscode://") {
+		t.Fatal(got)
+	}
+}
+
 func TestShowURI(t *testing.T) {
 	if got := showURI("vscodium"); got != "vscodium://navoff.vscode-agent-sessions/show" {
 		t.Fatal(got)

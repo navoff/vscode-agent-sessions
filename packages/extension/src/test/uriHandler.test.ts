@@ -20,6 +20,18 @@ test("parses a URI built by the tray helper, also after decoding it twice", () =
   assert.deepEqual(parseAgentSessionsUri(url.pathname, decodeURIComponent(url.search.slice(1))), want);
 });
 
+test("parses /read with the same payload as /open, also from the tray helper", () => {
+  assert.deepEqual(parseAgentSessionsUri("/read", `s=${payload({ machine: "local", agent: "codex", id: "t1" })}`), { kind: "read", machineId: "local", agent: "codex", id: "t1" });
+  const url = new URL(GO_URI.replace("/open?", "/read?"));
+  assert.deepEqual(parseAgentSessionsUri(url.pathname, url.search.slice(1)), { kind: "read", machineId: "my box", agent: "claude", id: "a&b" });
+  assert.equal(parseAgentSessionsUri("/read", ""), undefined);
+});
+
+test("parses /read-all", () => {
+  assert.deepEqual(parseAgentSessionsUri("/read-all", ""), { kind: "readAll" });
+  assert.deepEqual(parseAgentSessionsUri("/read-all", "s=x"), { kind: "readAll" });
+});
+
 test("parses /show", () => {
   assert.deepEqual(parseAgentSessionsUri("/show", ""), { kind: "show" });
   assert.deepEqual(parseAgentSessionsUri("/show", "x=1"), { kind: "show" });

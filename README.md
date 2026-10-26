@@ -11,7 +11,7 @@ agents' own session stores instead and stays out of their way.
 
 ![The Agent Sessions view: sessions of two agents grouped by machine and project, with running and unread marks](media/screenshot.png)
 
-![The tray menu: the sessions that wait for you, each with its agent icon, and the tray icon with a dot](media/tray-menu.png)
+![The tray menu: the sessions that wait for you, each with its agent icon and an "Open" / "Mark as read" submenu, "Mark all as read" under them, and the tray icon with a dot](media/tray-menu.png)
 
 ## Features
 
@@ -82,7 +82,7 @@ agents' own session stores instead and stays out of their way.
 | Open a remote session | Double-click opens a Remote-SSH window on the session folder of that machine (or focuses the one already open) and opens the session there. The machine's daemon must speak the current protocol; run **Prepare Machine** after updating the extension. |
 | Resume in a terminal | "Resume in Terminal" opens a terminal in the session folder with `claude --resume <id>` or `codex resume <id>` typed in, not run. |
 | Start a new session | The plus button that appears on a folder under the pointer, or "New Session…" in its context menu, asks for the agent, Claude Code or Codex, and starts a session in that folder: in this window when the folder is open in it, otherwise in a new window on the folder, a Remote-SSH one for a remote machine. |
-| Mark read / unread | Context menu. Opening a session marks it read, and so does having its editor tab active in the focused window: switching to the tab or back to the window clears the mark. A session shown in the Claude Code or Codex sidebar is not detected. |
+| Mark read / unread | Context menu. On Linux each session in the tray menu has a "Mark as read" item that clears it without opening it, and "Mark all as read" under the list clears every waiting session. Opening a session marks it read, and so does having its editor tab active in the focused window: switching to the tab or back to the window clears the mark. A session shown in the Claude Code or Codex sidebar is not detected. |
 | Hide / unhide | The crossed-out eye button that appears on a session under the pointer, to the left of the pin, or "Hide Session" in the context menu, removes the session from the tree; the eye button in the header shows hidden sessions dimmed with the word `hidden`. On a hidden session the button turns into an eye that brings the session back. |
 | Pin / unpin | The pin button that appears on a session under the pointer, or "Pin Session" in the context menu, moves the session to the top of its folder and adds a pin to its icon. The same button on a pinned session unpins it. |
 | Rename | The pencil button that appears on a Claude Code or Codex session under the pointer, to the left of the eye, "Rename Session…" in the context menu, or F2 in the focused list asks for a new name and has the agent itself write it, see below. |
@@ -92,7 +92,7 @@ agents' own session stores instead and stays out of their way.
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |
-| See what waits for you | The badge on the Agent Sessions icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon; a click opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
+| See what waits for you | The badge on the Agent Sessions icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon, each session a submenu with "Open" and "Mark as read", plus "Mark all as read" under the list; "Open" opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
 | Copy the id | "Copy Session ID". |
 
 ### Filter

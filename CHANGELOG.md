@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Each session in the tray menu is now a submenu with "Open" and "Mark as
+  read", the latter clearing it without opening it, and "Mark all as read"
+  under the list clears every waiting session at once.
 - A Claude Code session of a folder that is not the first one of a
   multi-root workspace no longer opens as an empty conversation in that
   window. Claude Code runs in the first folder only, so such a session now

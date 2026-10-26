@@ -204,27 +204,48 @@ func (a *app) render() {
 	systray.ResetMenu()
 	shown, more := menuSessions(sessions)
 	for _, s := range shown {
-		item := systray.AddMenuItem(menuLabel(s), s.Title)
-		if icon := agentIcon(s.Agent); icon != nil {
-			item.SetIcon(icon)
-		}
-		uri := sessionURI(scheme, s)
-		go func() {
-			for range item.ClickedCh {
-				openURI(cli, uri)
-			}
-		}()
+		a.addSessionMenu(scheme, cli, s)
 	}
 	if more > 0 {
 		systray.AddMenuItem(moreLabel(more), "").Disable()
 	}
 	if len(sessions) > 0 {
 		systray.AddSeparator()
+		all := systray.AddMenuItem("Mark all as read", "Mark every waiting session read without opening it")
+		uri := readAllURI(scheme)
+		go func() {
+			for range all.ClickedCh {
+				openURI(cli, uri)
+			}
+		}()
+		systray.AddSeparator()
 	}
 	about := systray.AddMenuItem("About", "Agent Sessions on the VS Code Marketplace")
 	go func() {
 		for range about.ClickedCh {
 			openWeb(marketplaceURL)
+		}
+	}()
+}
+
+// addSessionMenu adds session s as a submenu: "Open" opens it in VS Code,
+// "Mark as read" clears it without opening.
+func (a *app) addSessionMenu(scheme, cli string, s Session) {
+	item := systray.AddMenuItem(menuLabel(s), s.Title)
+	if icon := agentIcon(s.Agent); icon != nil {
+		item.SetIcon(icon)
+	}
+	open := item.AddSubMenuItem("Open", "Open the session in VS Code")
+	read := item.AddSubMenuItem("Mark as read", "Mark the session read without opening it")
+	openURL, readURL := sessionURI(scheme, s), readURI(scheme, s)
+	go func() {
+		for range open.ClickedCh {
+			openURI(cli, openURL)
+		}
+	}()
+	go func() {
+		for range read.ClickedCh {
+			openURI(cli, readURL)
 		}
 	}()
 }

@@ -29,16 +29,31 @@ func safeScheme(scheme string) string {
 // base64url parameter, which survives the extra percent-decoding on the VS
 // Code side unchanged (see uriRequest.ts).
 func sessionURI(scheme string, s Session) string {
+	return fmt.Sprintf("%s://%s/open?s=%s", safeScheme(scheme), extensionID, sessionPayload(s))
+}
+
+func showURI(scheme string) string {
+	return fmt.Sprintf("%s://%s/show", safeScheme(scheme), extensionID)
+}
+
+// sessionPayload is the session as one base64url parameter, see sessionURI.
+func sessionPayload(s Session) string {
 	payload, _ := json.Marshal(struct {
 		Machine string `json:"machine"`
 		Agent   string `json:"agent"`
 		ID      string `json:"id"`
 	}{s.Machine, s.Agent, s.ID})
-	return fmt.Sprintf("%s://%s/open?s=%s", safeScheme(scheme), extensionID, base64.RawURLEncoding.EncodeToString(payload))
+	return base64.RawURLEncoding.EncodeToString(payload)
 }
 
-func showURI(scheme string) string {
-	return fmt.Sprintf("%s://%s/show", safeScheme(scheme), extensionID)
+// readURI marks session s read in VS Code without opening it.
+func readURI(scheme string, s Session) string {
+	return fmt.Sprintf("%s://%s/read?s=%s", safeScheme(scheme), extensionID, sessionPayload(s))
+}
+
+// readAllURI marks every waiting session read.
+func readAllURI(scheme string) string {
+	return fmt.Sprintf("%s://%s/read-all", safeScheme(scheme), extensionID)
 }
 
 // desktopEntry is the desktop file name of the VS Code build behind scheme,

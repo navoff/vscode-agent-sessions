@@ -3,7 +3,8 @@
 // The real menu is drawn by the desktop and cannot be opened from a script,
 // so the picture is a faithful mock: the panel strip with the tray icon and
 // its dot, and above it the menu as Cinnamon draws it, with the agent icons
-// of packages/tray/icons.
+// of packages/tray/icons. Each session is a submenu; the second one is shown
+// open, to the left because the menu sits at the screen edge.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -30,28 +31,44 @@ const PAD = 6;
 const SEP = 9;
 const PANEL = 40;
 const GAP = 4;
-const LEFT = 110;
+const LEFT = 200;
 const TOP = 70;
-const menuW = 352;
+const menuW = 372;
 const menuX = LEFT;
 const menuY = TOP;
-const menuH = PAD + sessions.length * ROW + SEP + ROW + PAD;
+const menuH = PAD + sessions.length * ROW + SEP + ROW + SEP + ROW + PAD;
+// The open submenu of the session at OPEN.
+const OPEN = 1;
+const subW = 168;
+const subX = menuX - subW + 4;
+const subY = menuY + PAD + OPEN * ROW - PAD;
+const subH = PAD + 2 * ROW + PAD;
 const W = LEFT + menuW + 12;
 const H = TOP + menuH + GAP + PANEL;
 
 const rows = sessions
   .map((s, i) => {
     const y = menuY + PAD + i * ROW;
+    const highlight = i === OPEN ? `<rect x="4" y="0" width="${menuW - 8}" height="${ROW}" rx="3" fill="#4a4a4a"/>` : "";
     return `
   <g transform="translate(${menuX},${y})">
+    ${highlight}
     <image x="14" y="${(ROW - 20) / 2}" width="20" height="20" xlink:href="${iconData(s.agent)}"/>
     <text x="44" y="${ROW / 2 + 5}" class="label">${esc(s.title)} · ${esc(s.machine)}</text>
+    <text x="${menuW - 16}" y="${ROW / 2 + 5}" text-anchor="end" class="label">›</text>
   </g>`;
   })
   .join("");
 
 const sepY = menuY + PAD + sessions.length * ROW + SEP / 2;
-const aboutY = menuY + PAD + sessions.length * ROW + SEP;
+const allY = menuY + PAD + sessions.length * ROW + SEP;
+const sep2Y = allY + ROW + SEP / 2;
+const aboutY = allY + ROW + SEP;
+
+const submenu = `
+  <rect x="${subX}" y="${subY}" width="${subW}" height="${subH}" rx="4" fill="#333333" stroke="#1a1a1a"/>
+  <text x="${subX + 20}" y="${subY + PAD + ROW / 2 + 5}" class="label">Open</text>
+  <text x="${subX + 20}" y="${subY + PAD + ROW + ROW / 2 + 5}" class="label">Mark as read</text>`;
 
 // The tray icon as packages/tray/icon.go draws it, with the dot.
 const iconX = W - 12 - 22 - 60;
@@ -80,7 +97,10 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.
   <rect x="${menuX}" y="${menuY}" width="${menuW}" height="${menuH}" rx="4" fill="#333333" stroke="#1a1a1a"/>
   ${rows}
   <line x1="${menuX + 8}" y1="${sepY}" x2="${menuX + menuW - 8}" y2="${sepY}" stroke="#222222"/>
+  <text x="${menuX + 44}" y="${allY + ROW / 2 + 5}" class="label">Mark all as read</text>
+  <line x1="${menuX + 8}" y1="${sep2Y}" x2="${menuX + menuW - 8}" y2="${sep2Y}" stroke="#222222"/>
   <text x="${menuX + 44}" y="${aboutY + ROW / 2 + 5}" class="label">About</text>
+  ${submenu}
 </svg>
 `;
 
