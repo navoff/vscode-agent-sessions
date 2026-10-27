@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A click on a notification or in the tray menu no longer ends with "this
+  session is not in the list of this window" when the last focused window
+  is a Remote-SSH one. The tray helper now hands the click to a local
+  window, which opens the session and brings its window to the front,
+  instead of opening a vscode:// link that VS Code gives to the last
+  focused window.
+
 ## 0.3.0 - 2026-10-26
 
 - The sessions view now lives in the Explorer, under the files of the

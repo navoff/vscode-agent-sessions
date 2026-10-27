@@ -230,6 +230,23 @@ export interface OpenSessionOptions {
    * straight to the window that has it, or to a new one, without asking.
    */
   autoHandOver?: boolean;
+  /**
+   * The request came from outside VS Code, such as a click in the tray, and
+   * this window may be behind others: bring it to the front when the session
+   * opens here. A window the session is handed over to comes up by itself.
+   */
+  raise?: boolean;
+}
+
+/**
+ * Brings this window to the front: `vscode.openFolder` on the window's own
+ * target focuses it (see state/windowRegistry.ts). A window without a folder
+ * or with an unsaved multi-root workspace has no such target and stays put.
+ */
+export async function raiseThisWindow(): Promise<void> {
+  const ws = vscode.workspace.workspaceFile;
+  const target = ws ? (ws.scheme === "file" ? ws : undefined) : vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (target) await vscode.commands.executeCommand("vscode.openFolder", target, { forceNewWindow: true });
 }
 
 export async function openSession(deps: CommandDeps, machineId: string, session: SessionInfo, opts?: OpenSessionOptions): Promise<void> {
@@ -238,15 +255,16 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
   if (session.agent === "claude") {
     if (!vscode.extensions.getExtension(CLAUDE_EXTENSION) && !(await offerInstall(CLAUDE_EXTENSION, "Claude Code"))) return;
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-    if (!(await claudeFindsSession(session.cwd, folders))) {
-      if (opts?.autoHandOver && (await isDirectory(session.cwd))) {
-        await handOverToWindow(deps, session);
-        return;
-      }
-      return offerClaudeFolder(deps, session);
+    const here = await claudeFindsSession(session.cwd, folders);
+    if (!here && opts?.autoHandOver && (await isDirectory(session.cwd))) {
+      await handOverToWindow(deps, session);
+      return;
     }
+    if (opts?.raise) await raiseThisWindow();
+    if (!here) return offerClaudeFolder(deps, session);
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
+    if (opts?.raise) await raiseThisWindow();
     if (!vscode.extensions.getExtension(CODEX_EXTENSION) && !(await offerInstall(CODEX_EXTENSION, "Codex"))) return;
     await openCodexThread(session.id);
   } else {

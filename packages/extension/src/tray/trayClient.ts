@@ -1,5 +1,6 @@
 import { join, normalize } from "node:path";
 import { socketDir } from "../connection/sharedDaemon.js";
+import { parseTrayAction, type UriRequest } from "./uriRequest.js";
 
 const CLI_NAMES: Record<string, string> = { vscode: "code", "vscode-insiders": "code-insiders", vscodium: "codium" };
 
@@ -39,10 +40,13 @@ export interface TrayNotification {
   icon?: string;
 }
 
-export type TrayMessage = ({ type: "state" } & TrayState) | ({ type: "notify" } & TrayNotification);
+/** `actions` tells the helper that this window takes the clicks it hands back (see onAction). */
+export type TrayMessage = ({ type: "state"; actions?: boolean } & TrayState) | ({ type: "notify" } & TrayNotification);
 
 export interface TraySocket {
   write(line: string): void;
+  /** Each line the helper sends, without the newline. */
+  onLine(cb: (line: string) => void): void;
   onClose(cb: () => void): void;
   end(): void;
 }
@@ -54,6 +58,12 @@ export interface TrayClientOptions {
   connect(path: string): Promise<TraySocket>;
   spawn(binary: string, socketPath: string): Promise<void>;
   log(line: string): void;
+  /**
+   * A click on a notification or in the menu, which the helper hands to the
+   * window heard from last instead of opening a vscode:// URI: VS Code gives
+   * a URI to the window focused last, which may be a Remote one.
+   */
+  onAction?(req: UriRequest): void;
   now?(): number;
   sleep?(ms: number): Promise<void>;
 }
@@ -136,7 +146,7 @@ export class TrayClient {
   /** Sends the last state unless the current socket already has it. */
   private sendState(): void {
     if (!this.lastState) return;
-    const line = encodeTrayMessage({ type: "state", ...this.lastState });
+    const line = encodeTrayMessage({ type: "state", actions: true, ...this.lastState });
     if (line === this.sentStateLine) return;
     if (this.write(line)) this.sentStateLine = line;
   }
@@ -215,6 +225,12 @@ export class TrayClient {
     this.failureLogged = false;
     socket.onClose(() => {
       if (this.socket === socket) this.drop(false);
+    });
+    socket.onLine((line) => {
+      if (this.socket !== socket) return;
+      const req = parseTrayAction(line);
+      if (req) this.opts.onAction?.(req);
+      else this.opts.log(`[tray] ignoring line: ${line.slice(0, 200)}`);
     });
     this.sendState();
   }

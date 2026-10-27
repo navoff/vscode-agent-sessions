@@ -16,9 +16,10 @@ type Session struct {
 
 // Message is one JSON line from a VS Code window: the full state, or one
 // notification to show, about a session or (Session nil) about several.
-// There are no replies.
+// There are no replies; clicks go back as Action lines.
 type Message struct {
 	Type     string    `json:"type"`
+	Actions  bool      `json:"actions,omitempty"` // state: the window takes Action lines
 	Scheme   string    `json:"scheme,omitempty"`
 	Cli      string    `json:"cli,omitempty"`
 	Sessions []Session `json:"sessions,omitempty"`
@@ -26,6 +27,31 @@ type Message struct {
 	Body     string    `json:"body,omitempty"`
 	Icon     string    `json:"icon,omitempty"`
 	Session  *Session  `json:"session,omitempty"`
+}
+
+// Action is one JSON line to a VS Code window, a click on a notification or
+// in the menu: "open" or "read" one session, "readAll", "show" the view. The
+// window does what the vscode:// URI of the same click does (see
+// uriRequest.ts in the extension).
+type Action struct {
+	Type    string      `json:"type"`
+	Session *SessionRef `json:"session,omitempty"`
+}
+
+// SessionRef names a session for an Action.
+type SessionRef struct {
+	Machine string `json:"machine"`
+	Agent   string `json:"agent"`
+	ID      string `json:"id"`
+}
+
+func refOf(s Session) *SessionRef {
+	return &SessionRef{Machine: s.Machine, Agent: s.Agent, ID: s.ID}
+}
+
+func encodeAction(act Action) []byte {
+	line, _ := json.Marshal(act)
+	return append(line, '\n')
 }
 
 var errBadMessage = errors.New("bad message")

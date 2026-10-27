@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAgentSessionsUri } from "../tray/uriRequest.js";
+import { parseAgentSessionsUri, parseTrayAction } from "../tray/uriRequest.js";
 
 const payload = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
 
@@ -49,4 +49,18 @@ test("rejects other paths, the old parameters and bad payloads", () => {
   assert.equal(parseAgentSessionsUri("/open", `s=${payload({ machine: "local", agent: "claude" })}`), undefined);
   assert.equal(parseAgentSessionsUri("/open", `s=${payload({ machine: "", agent: "claude", id: "a" })}`), undefined);
   assert.equal(parseAgentSessionsUri("/open", `s=${payload({ machine: "local", agent: "claude", id: 7 })}`), undefined);
+});
+
+test("parses the clicks the tray helper hands back, as the helper encodes them", () => {
+  // encodeAction in the helper's protocol.go.
+  assert.deepEqual(parseTrayAction(`{"type":"open","session":{"machine":"local","agent":"claude","id":"a1"}}`), { kind: "open", machineId: "local", agent: "claude", id: "a1" });
+  assert.deepEqual(parseTrayAction(`{"type":"read","session":{"machine":"my box","agent":"codex","id":"t1"}}`), { kind: "read", machineId: "my box", agent: "codex", id: "t1" });
+  assert.deepEqual(parseTrayAction(`{"type":"readAll"}`), { kind: "readAll" });
+  assert.deepEqual(parseTrayAction(`{"type":"show"}`), { kind: "show" });
+});
+
+test("rejects other tray lines", () => {
+  for (const line of ["", "{", "[]", "null", `{"type":"state","sessions":[]}`, `{"type":"open"}`, `{"type":"open","session":{"machine":"local","agent":"claude"}}`, `{"type":"read","session":{"machine":"","agent":"claude","id":"a"}}`, `{"type":"open","session":"local/claude:a"}`]) {
+    assert.equal(parseTrayAction(line), undefined, line);
+  }
 });

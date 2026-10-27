@@ -3,7 +3,7 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { AgentKind } from "@agent-sessions/core";
+import type { AgentKind, SessionInfo } from "@agent-sessions/core";
 import { clearPendingOpen, PROTOCOL_VERSION, readPendingOpen } from "@agent-sessions/daemon";
 import { daemonVersionAction, protocolMismatchAction } from "./connection/daemonUpgrade.js";
 import { isProtocolMismatch, MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
@@ -11,7 +11,7 @@ import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnecti
 import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
-import { CODEX_EDITOR_VIEW_TYPE, confirmAndMoveSessions, openSession, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
+import { CODEX_EDITOR_VIEW_TYPE, confirmAndMoveSessions, openSession, raiseThisWindow, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
 import { canonical, claudeFindsSession, isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
 import { findWindowForFolder, removeWindowRecord, writeWindowRecord } from "./state/windowRegistry.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
@@ -21,7 +21,7 @@ import { SessionMarks } from "./state/marks.js";
 import { attentionBadge, attentionRows, attentionSnapshot, AttentionTracker, burstTitle, gainedAttention, notificationPlan, NOTIFY_SETTLE_MS, toastText } from "./state/attention.js";
 import { markKey } from "./state/marks.js";
 import { CLAIM_MAX_AGE_MS, claimNotification, pruneNotifyClaims } from "./tray/notifyClaim.js";
-import { registerUriHandler } from "./tray/uriHandler.js";
+import { handleRequest, registerUriHandler, type UriHandlerDeps } from "./tray/uriHandler.js";
 import { TrayClient, trayBinaryPath, traySocketPath, vscodeCliPath } from "./tray/trayClient.js";
 import { nodeTrayIo } from "./tray/trayIo.js";
 import { SessionStore, type SessionRow } from "./state/sessionStore.js";
@@ -34,6 +34,8 @@ import { SessionsTreeProvider } from "./tree/treeProvider.js";
 const LOCAL_ID = "local";
 const FILTER_KEY = "agentSessions.filter";
 const AUTO_RESTART_INTERVAL_MS = 60_000;
+/** How long a URI that came before a machine's first list waits for it. */
+const FIRST_LIST_WAIT_MS = 10_000;
 // VS Code prefixes the view type of a webview panel in its tab input.
 const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
 
@@ -80,8 +82,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     binaryPath: trayBinary,
     ...nodeTrayIo(join(context.globalStorageUri.fsPath, "tray"), appendLog),
     log: appendLog,
+    onAction: (req) => handleRequest(req, requestDeps),
   });
   const connections = new Map<string, MachineConnection>();
+  // Machines whose first list of sessions has come, and requests waiting for one.
+  const listedMachines = new Set<string>();
+  const listWaiters = new Map<string, (() => void)[]>();
+  const listed = (id: string) => {
+    listedMachines.add(id);
+    listWaiters.get(id)?.forEach((wake) => wake());
+    listWaiters.delete(id);
+  };
+  const whenListed = (id: string, timeoutMs: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      listWaiters.set(id, [...(listWaiters.get(id) ?? []), () => (clearTimeout(timer), resolve())]);
+    });
   const daemonPath = context.asAbsolutePath("dist/daemon.mjs");
   let bundledDaemonVersion: string | undefined;
   if (BUNDLED_DAEMON_VERSION !== undefined) {
@@ -325,6 +341,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         onSessions: (sessions) => {
           store.setMachineSessions(id, sessions);
+          listed(id);
           refresh();
           if (id === LOCAL_ID) onViewChange();
         },
@@ -594,17 +611,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   };
   registerSessionCommands(context, sessionDeps);
-  registerUriHandler(context, {
+  // A session asked for by a vscode:// URI or a click in the tray. A URI can
+  // start the extension (onUri) and come before the machine's first list,
+  // so a session not found yet is looked up again once the list is in.
+  const findRequested = async (machineId: string, agent: string, id: string): Promise<SessionInfo | undefined> => {
+    const key = `${agent}:${id}`;
+    const found = store.find(machineId, key);
+    if (found || listedMachines.has(machineId)) return found;
+    await whenListed(machineId, FIRST_LIST_WAIT_MS);
+    return store.find(machineId, key);
+  };
+  const requestDeps: UriHandlerDeps = {
     openSession: async (machineId, agent, id) => {
-      const session = store.find(machineId, `${agent}:${id}`);
+      const session = await findRequested(machineId, agent, id);
       if (!session) {
         void vscode.window.showInformationMessage("Agent Sessions: this session is not in the list of this window (its machine may be disconnected).");
         return;
       }
-      await openSession(sessionDeps, machineId, session, { autoHandOver: true });
+      await openSession(sessionDeps, machineId, session, { autoHandOver: true, raise: true });
     },
-    markRead: (machineId, agent, id) => {
-      const session = store.find(machineId, `${agent}:${id}`);
+    markRead: async (machineId, agent, id) => {
+      const session = await findRequested(machineId, agent, id);
       if (!session) {
         appendLog(`[uri] cannot mark ${machineId} ${agent}:${id} read: not in this window's list`);
         return;
@@ -617,8 +644,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       for (const r of currentAttention()) store.markRead(r.machineId, r.session, now);
       refresh();
     },
+    show: async () => {
+      await raiseThisWindow();
+      await vscode.commands.executeCommand("agentSessions.view.focus");
+    },
     log: appendLog,
-  });
+  };
+  registerUriHandler(context, requestDeps);
 
   // A session, or a request for a new one, that another window handed over to
   // a window on its folder, through the pending-open file of this machine (see

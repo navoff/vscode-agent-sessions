@@ -49,3 +49,21 @@ func TestDecodeStateCli(t *testing.T) {
 		t.Fatalf("cli = %q", m.Cli)
 	}
 }
+
+func TestDecodeStateActions(t *testing.T) {
+	m, err := decodeMessage([]byte(`{"type":"state","actions":true,"scheme":"vscode","sessions":[]}`))
+	if err != nil || !m.Actions {
+		t.Fatalf("actions not seen: %+v, %v", m, err)
+	}
+	m, err = decodeMessage([]byte(`{"type":"state","scheme":"vscode","sessions":[]}`))
+	if err != nil || m.Actions {
+		t.Fatalf("actions seen in an old state: %+v, %v", m, err)
+	}
+}
+
+func TestEncodeAction(t *testing.T) {
+	got := string(encodeAction(Action{Type: "read", Session: refOf(Session{Machine: "local", MachineName: "This machine", Agent: "codex", ID: "t1", Title: "T"})}))
+	if got != `{"type":"read","session":{"machine":"local","agent":"codex","id":"t1"}}`+"\n" {
+		t.Fatalf("got %q", got)
+	}
+}

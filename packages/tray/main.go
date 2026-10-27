@@ -21,6 +21,7 @@ const (
 	idleExitDelay  = 5 * time.Second
 	startupTimeout = 10 * time.Second
 	maxLineBytes   = 1 << 20
+	writeTimeout   = time.Second
 )
 
 // socketLock is kept for the process lifetime; closing it would drop the flock.
@@ -84,6 +85,21 @@ func listen(path string) (net.Listener, error) {
 	return ln, nil
 }
 
+// window is the connection of one local VS Code window.
+type window struct {
+	conn    net.Conn
+	actions bool       // it said it takes Action lines; guarded by app.mu
+	mu      sync.Mutex // one line at a time
+}
+
+func (w *window) send(line []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_ = w.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	_, err := w.conn.Write(line)
+	return err
+}
+
 type app struct {
 	mu       sync.Mutex
 	ready    bool
@@ -91,8 +107,10 @@ type app struct {
 	cli      string // VS Code CLI used to open URIs; empty means xdg-open
 	sessions []Session
 	clients  int
+	windows  []*window // those that take clicks, the one heard from last first
 	idle     *time.Timer
 	notify   *notifier
+	openURI  func(cli, uri string)
 	renderMu sync.Mutex // serializes render: the menu rebuild is not atomic
 }
 
@@ -114,9 +132,11 @@ func (a *app) serve(ln net.Listener) {
 }
 
 func (a *app) handle(c net.Conn) {
+	w := &window{conn: c}
 	defer func() {
 		c.Close()
 		a.mu.Lock()
+		a.windows = slices.DeleteFunc(a.windows, func(x *window) bool { return x == w })
 		a.clients--
 		if a.clients == 0 {
 			a.idle = time.AfterFunc(idleExitDelay, systray.Quit)
@@ -131,6 +151,7 @@ func (a *app) handle(c net.Conn) {
 			logf("ignoring line: %v", err)
 			continue
 		}
+		a.heard(w, m)
 		switch m.Type {
 		case "state":
 			a.setState(m.Scheme, m.Cli, m.Sessions)
@@ -141,6 +162,43 @@ func (a *app) handle(c net.Conn) {
 	if err := sc.Err(); err != nil {
 		logf("client connection: %v", err)
 	}
+}
+
+// heard puts w first among the windows that clicks go to, once its state
+// said it takes them: a window still running an older extension would drop
+// the line.
+func (a *app) heard(w *window, m Message) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if m.Type == "state" && m.Actions {
+		w.actions = true
+	}
+	if !w.actions || (len(a.windows) > 0 && a.windows[0] == w) {
+		return
+	}
+	a.windows = append([]*window{w}, slices.DeleteFunc(a.windows, func(x *window) bool { return x == w })...)
+}
+
+// act hands a click to the window heard from last. Every connected window is
+// a local one with the whole list, so it can open any session of this
+// machine, handing it over to the window on its folder. The vscode:// URI
+// is only the fallback when no window takes the line: VS Code gives it to
+// the window focused last, and in a Remote window "This machine" is the
+// remote host, which does not have the session.
+func (a *app) act(act Action, uri string) {
+	line := encodeAction(act)
+	a.mu.Lock()
+	windows := slices.Clone(a.windows)
+	cli := a.cli
+	a.mu.Unlock()
+	for _, w := range windows {
+		err := w.send(line)
+		if err == nil {
+			return
+		}
+		logf("handing %s to a window: %v", act.Type, err)
+	}
+	a.openURI(cli, uri)
 }
 
 // storeState keeps the state; true when it differs from the previous one.
@@ -176,14 +234,14 @@ func (a *app) showNotification(m Message) {
 		return
 	}
 	a.mu.Lock()
-	scheme, cli := a.scheme, a.cli
+	scheme := a.scheme
 	a.mu.Unlock()
 	// A summary of several sessions has none; its click shows the view.
-	uri := showURI(scheme)
+	act, uri := Action{Type: "show"}, showURI(scheme)
 	if m.Session != nil {
-		uri = sessionURI(scheme, *m.Session)
+		act, uri = Action{Type: "open", Session: refOf(*m.Session)}, sessionURI(scheme, *m.Session)
 	}
-	if err := a.notify.show(m.Title, m.Body, m.Icon, func() { openURI(cli, uri) }, desktopEntry(scheme)); err != nil {
+	if err := a.notify.show(m.Title, m.Body, m.Icon, func() { a.act(act, uri) }, desktopEntry(scheme)); err != nil {
 		logf("notify: %v", err)
 	}
 }
@@ -195,7 +253,7 @@ func (a *app) render() {
 	a.renderMu.Lock()
 	defer a.renderMu.Unlock()
 	a.mu.Lock()
-	scheme, cli := a.scheme, a.cli
+	scheme := a.scheme
 	sessions := append([]Session(nil), a.sessions...)
 	a.mu.Unlock()
 
@@ -204,7 +262,7 @@ func (a *app) render() {
 	systray.ResetMenu()
 	shown, more := menuSessions(sessions)
 	for _, s := range shown {
-		a.addSessionMenu(scheme, cli, s)
+		a.addSessionMenu(scheme, s)
 	}
 	if more > 0 {
 		systray.AddMenuItem(moreLabel(more), "").Disable()
@@ -215,7 +273,7 @@ func (a *app) render() {
 		uri := readAllURI(scheme)
 		go func() {
 			for range all.ClickedCh {
-				openURI(cli, uri)
+				a.act(Action{Type: "readAll"}, uri)
 			}
 		}()
 		systray.AddSeparator()
@@ -230,7 +288,7 @@ func (a *app) render() {
 
 // addSessionMenu adds session s as a submenu: "Open" opens it in VS Code,
 // "Mark as read" clears it without opening.
-func (a *app) addSessionMenu(scheme, cli string, s Session) {
+func (a *app) addSessionMenu(scheme string, s Session) {
 	item := systray.AddMenuItem(menuLabel(s), s.Title)
 	if icon := agentIcon(s.Agent); icon != nil {
 		item.SetIcon(icon)
@@ -240,12 +298,12 @@ func (a *app) addSessionMenu(scheme, cli string, s Session) {
 	openURL, readURL := sessionURI(scheme, s), readURI(scheme, s)
 	go func() {
 		for range open.ClickedCh {
-			openURI(cli, openURL)
+			a.act(Action{Type: "open", Session: refOf(s)}, openURL)
 		}
 	}()
 	go func() {
 		for range read.ClickedCh {
-			openURI(cli, readURL)
+			a.act(Action{Type: "read", Session: refOf(s)}, readURL)
 		}
 	}()
 }
@@ -273,7 +331,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	a := &app{scheme: "vscode"}
+	a := &app{scheme: "vscode", openURI: openURI}
 	if n, err := newNotifier(); err == nil {
 		a.notify = n
 	} else {
