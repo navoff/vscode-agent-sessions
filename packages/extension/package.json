@@ -194,6 +194,16 @@
         "category": "Agent Sessions"
       },
       {
+        "command": "agentSessions.enableAutoConnect",
+        "title": "Connect Automatically",
+        "category": "Agent Sessions"
+      },
+      {
+        "command": "agentSessions.disableAutoConnect",
+        "title": "Don't Connect Automatically",
+        "category": "Agent Sessions"
+      },
+      {
         "command": "agentSessions.prepareMachine",
         "title": "Prepare Machine",
         "category": "Agent Sessions"
@@ -422,6 +432,16 @@
           "command": "agentSessions.disableMachine",
           "when": "view == agentSessions.view && viewItem =~ /^machine:remote:enabled/",
           "group": "1_machine@3"
+        },
+        {
+          "command": "agentSessions.enableAutoConnect",
+          "when": "view == agentSessions.view && viewItem =~ /^machine:remote:enabled:manual:/",
+          "group": "1_machine@4"
+        },
+        {
+          "command": "agentSessions.disableAutoConnect",
+          "when": "view == agentSessions.view && viewItem =~ /^machine:remote:enabled:auto:/",
+          "group": "1_machine@4"
         },
         {
           "command": "agentSessions.removeMachine",

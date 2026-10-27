@@ -182,6 +182,15 @@ The ssh connection uses `BatchMode=yes`, `RemoteCommand=none` and
 `RequestTTY=no`, so hosts that force an interactive shell in ssh config still
 work, and no password prompt can appear.
 
+A machine connects when you click **Connect** on it. **Connect
+Automatically** in its context menu makes it connect on startup and again
+after the connection drops, and connects it right away; **Don't Connect
+Automatically** turns that off. A connected machine counts in the badge,
+the tray menu and the notifications of the local windows like this one, so
+a session that finishes on a remote host is announced on your desktop
+while you work in a Remote-SSH window on it, as long as one local window
+is open.
+
 Opening a remote session in place is not possible yet; remote sessions are
 shown with their status and can be hidden, marked and deleted.
 
@@ -217,7 +226,7 @@ at **Show Log**; the daemon's own log is `daemon.log` next to the socket.
 | `agentSessions.tray` | `true` | Show the icon in the system tray. Linux only, local windows only (not Remote-SSH). |
 
 Machines are kept in `machines.json` under the extension's global storage;
-the file can be edited by hand (for example to set `"autoConnect": true`).
+the file can be edited by hand.
 
 ## How it works
 
