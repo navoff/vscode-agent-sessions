@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import * as vscode from "vscode";
-import { buildTree, projectContextValue, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, type MachineInput, type MachineNode, type TreeFilter, type TreeNode } from "./treeModel.js";
+import { buildTree, machineContextValue, projectContextValue, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, type MachineInput, type MachineNode, type TreeFilter, type TreeNode } from "./treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 export interface TreeSource {
@@ -60,7 +60,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       m.state === "error"
         ? new vscode.ThemeIcon("warning", new vscode.ThemeColor("errorForeground"))
         : new vscode.ThemeIcon(m.isLocal ? "device-desktop" : "vm");
-    item.contextValue = `machine:${m.isLocal ? "local" : "remote"}:${enabled ? "enabled" : "disabled"}:${m.state}`;
+    item.contextValue = machineContextValue(m, enabled);
     return item;
   }
 

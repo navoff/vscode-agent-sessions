@@ -8,6 +8,10 @@
   window, which opens the session and brings its window to the front,
   instead of opening a vscode:// link that VS Code gives to the last
   focused window.
+- "Connect Automatically" and "Don't Connect Automatically" in the context
+  menu of a remote machine set whether it connects on startup and after a
+  dropped connection, which so far took editing `machines.json`. Turning it
+  on also connects the machine now.
 
 ## 0.3.0 - 2026-10-26
 

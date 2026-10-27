@@ -146,7 +146,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const list: MachineInput[] = [{ id: LOCAL_ID, name: "This machine", isLocal: true, state: local?.state ?? "disconnected", error: local?.error }];
         for (const m of machines.machines) {
           const c = connections.get(m.id);
-          list.push({ id: m.id, name: m.name, isLocal: false, state: c?.state ?? "disconnected", error: c?.error, home: c?.home ?? m.remoteHome });
+          list.push({ id: m.id, name: m.name, isLocal: false, state: c?.state ?? "disconnected", error: c?.error, home: c?.home ?? m.remoteHome, autoConnect: m.autoConnect });
         }
         return list;
       },
@@ -535,6 +535,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (id === LOCAL_ID) continue;
       const m = machines.machines.find((x) => x.id === id);
       if (!m || !m.enabled) dropConnection(id);
+      else connections.get(id)?.setAutoReconnect(m.autoConnect);
     }
     refresh();
   };

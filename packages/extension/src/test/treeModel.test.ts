@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { SessionInfo } from "@agent-sessions/core";
-import { buildTree, projectContextValue, relativeTime, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, shortenCwd, type MachineInput } from "../tree/treeModel.js";
+import { buildTree, machineContextValue, projectContextValue, relativeTime, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, shortenCwd, type MachineInput } from "../tree/treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 const s = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/home/u/work/a", createdAt: 1, updatedAt: 1000, status: "idle", ...over });
@@ -165,6 +165,20 @@ test("session menu entries in package.json follow the contextValue", () => {
   assert.deepEqual(sessionMenu(cv("hz", { agent: "codex" })), ["markUnread", "hideSession", "pinSession", "copySessionId", "renameSession", "deleteSession"]);
   // Only Claude Code and Codex sessions can be renamed.
   assert.deepEqual(sessionMenu(cv("local", { agent: "opencode" })), ["openSession", "markUnread", "hideSession", "pinSession", "copySessionId", "deleteSession"]);
+});
+
+test("machine menu entries in package.json follow the contextValue", () => {
+  const remote = (over: Partial<MachineInput>, enabled = true) => machineContextValue({ id: "hz", name: "hz", isLocal: false, state: "disconnected", ...over }, enabled);
+  assert.equal(remote({}), "machine:remote:enabled:manual:disconnected");
+  assert.equal(remote({ autoConnect: true, state: "connected" }), "machine:remote:enabled:auto:connected");
+  assert.equal(machineContextValue({ id: "local", name: "This machine", isLocal: true, state: "connected" }, true), "machine:local:enabled:auto:connected");
+  assert.deepEqual(sessionMenu(remote({})), ["prepareMachine", "renameMachine", "disableMachine", "enableAutoConnect", "removeMachine"]);
+  assert.deepEqual(sessionMenu(remote({ autoConnect: true })), ["prepareMachine", "renameMachine", "disableMachine", "disableAutoConnect", "removeMachine"]);
+  // A disabled machine does not connect at all, so it offers neither.
+  assert.deepEqual(sessionMenu(remote({ autoConnect: true }, false)), ["prepareMachine", "renameMachine", "enableMachine", "removeMachine"]);
+  assert.deepEqual(sessionMenu(machineContextValue({ id: "local", name: "This machine", isLocal: true, state: "connected" }, true)), []);
+  assert.deepEqual(sessionMenu(remote({}), true), ["connectMachine"]);
+  assert.deepEqual(sessionMenu(remote({ autoConnect: true, state: "connected" }), true), ["disconnectMachine"]);
 });
 
 test("a session row has three inline buttons: rename, hide or unhide, then pin or unpin", () => {

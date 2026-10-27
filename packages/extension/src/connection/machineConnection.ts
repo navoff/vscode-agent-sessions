@@ -76,13 +76,16 @@ export class MachineConnection {
   private wantConnected = false;
   /** Bumped on every open and teardown, so a factory that resolves late is discarded. */
   private generation = 0;
+  private autoReconnect: boolean;
 
   constructor(
     readonly machineId: string,
     private readonly factory: ProcessFactory,
     private readonly events: MachineConnectionEvents,
     private readonly opts: MachineConnectionOptions,
-  ) {}
+  ) {
+    this.autoReconnect = opts.autoReconnect;
+  }
 
   connect(): void {
     this.wantConnected = true;
@@ -189,11 +192,16 @@ export class MachineConnection {
     this.client.start();
   }
 
+  /** Follows the machine's autoConnect after a change; takes effect at the next failure. */
+  setAutoReconnect(on: boolean): void {
+    this.autoReconnect = on;
+  }
+
   private onFailure(message: string): void {
     if (!this.wantConnected) return;
     this.teardown();
     this.setState("error", message);
-    if (!this.opts.autoReconnect || (this.opts.retryOnProtocolMismatch === false && isProtocolMismatch(message))) {
+    if (!this.autoReconnect || (this.opts.retryOnProtocolMismatch === false && isProtocolMismatch(message))) {
       this.wantConnected = false;
       return;
     }

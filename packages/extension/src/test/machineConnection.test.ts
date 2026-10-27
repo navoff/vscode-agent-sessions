@@ -79,6 +79,22 @@ test("no reconnect when autoReconnect is off, disconnect kills the process", asy
   assert.equal(h.getSessions().size, 0);
 });
 
+test("setAutoReconnect turns reconnecting on and off for the next failure", async () => {
+  const h = harness(false);
+  h.conn.setAutoReconnect(true);
+  h.conn.connect();
+  await tick(5);
+  h.procs[0].exit(1);
+  await tick(30);
+  assert.equal(h.procs.length, 2);
+  h.conn.setAutoReconnect(false);
+  h.procs[1].exit(1);
+  await tick(40);
+  assert.equal(h.procs.length, 2);
+  assert.equal(h.conn.state, "error");
+  h.conn.dispose();
+});
+
 test("factory failure is reported as error", async () => {
   const states: MachineState[] = [];
   const conn = new MachineConnection("m", () => { throw new Error("no ssh"); }, { onStateChange: (st) => states.push(st), onSessions: () => {} }, { autoReconnect: false });

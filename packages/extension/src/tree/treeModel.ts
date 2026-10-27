@@ -16,6 +16,7 @@ export interface MachineInput {
   state: MachineState;
   error?: string;
   home?: string; // remote machine home directory, from the daemon hello
+  autoConnect?: boolean; // connects on startup and after a drop; the local machine always does
 }
 
 export interface SessionNode {
@@ -112,6 +113,15 @@ export function sessionContextValue(row: SessionRow): string {
     row.pinned ? "pinned" : "unpinned",
     s.status === "running" ? "running" : "idle",
   ].join(":");
+}
+
+/**
+ * The machine's contextValue, matched by the `when` clauses in package.json:
+ * `machine:<local|remote>:<enabled|disabled>:<auto|manual>:<state>`.
+ */
+export function machineContextValue(m: MachineInput, enabled: boolean): string {
+  const auto = m.isLocal || m.autoConnect === true;
+  return ["machine", m.isLocal ? "local" : "remote", enabled ? "enabled" : "disabled", auto ? "auto" : "manual", m.state].join(":");
 }
 
 /**

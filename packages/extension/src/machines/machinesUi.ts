@@ -103,6 +103,19 @@ export function registerMachineCommands(context: vscode.ExtensionContext, deps: 
     await deps.save(updateMachine(deps.current(), m.id, { enabled: false }));
   });
 
+  // Connects on startup and after a drop; turning it on connects now as well.
+  reg("agentSessions.enableAutoConnect", async (node) => {
+    const m = await pickMachine(deps, node, "Connect machine automatically");
+    if (!m) return;
+    await deps.save(updateMachine(deps.current(), m.id, { autoConnect: true }));
+    if (m.enabled) deps.connect(m.id);
+  });
+
+  reg("agentSessions.disableAutoConnect", async (node) => {
+    const m = await pickMachine(deps, node, "Stop connecting machine automatically");
+    if (m) await deps.save(updateMachine(deps.current(), m.id, { autoConnect: false }));
+  });
+
   reg("agentSessions.prepareMachine", async (node) => {
     const m = await pickMachine(deps, node, "Prepare machine");
     if (m) await runPrepare(deps, m);
