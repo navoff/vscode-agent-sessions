@@ -1,12 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { UriRequest } from "../tray/uriRequest.js";
 import { encodeTrayMessage, TrayClient, trayBinaryPath, traySocketPath, vscodeCliPath, type TraySocket, type TrayState } from "../tray/trayClient.js";
 
 class FakeSocket implements TraySocket {
   lines: string[] = [];
   closeCb: (() => void) | undefined;
+  lineCb: ((line: string) => void) | undefined;
   ended = false;
   write(line: string) { this.lines.push(line); }
+  onLine(cb: (line: string) => void) { this.lineCb = cb; }
   onClose(cb: () => void) { this.closeCb = cb; }
   end() { this.ended = true; }
 }
@@ -18,10 +21,11 @@ interface Harness {
   log: string[];
   available: boolean;
   clock: number;
+  actions: UriRequest[];
 }
 
 function harness(opts: { binary?: string | undefined; available?: boolean } = {}): Harness {
-  const h: Harness = { sockets: [], spawns: 0, log: [], available: opts.available ?? true, clock: 1_000_000 } as unknown as Harness;
+  const h: Harness = { sockets: [], spawns: 0, log: [], available: opts.available ?? true, clock: 1_000_000, actions: [] } as unknown as Harness;
   h.client = new TrayClient({
     socketPath: "/tmp/t.sock",
     binaryPath: "binary" in opts ? opts.binary : "/ext/dist/tray/linux-amd64/agent-sessions-tray",
@@ -36,16 +40,19 @@ function harness(opts: { binary?: string | undefined; available?: boolean } = {}
       h.available = true;
     },
     log: (l) => h.log.push(l),
+    onAction: (req) => h.actions.push(req),
     now: () => h.clock,
     sleep: async () => {},
   });
   return h;
 }
 
+const stateLine = (s: TrayState) => encodeTrayMessage({ type: "state", actions: true, ...s });
+
 const state: TrayState = { scheme: "vscode", sessions: [{ machine: "local", machineName: "This machine", agent: "claude", id: "a", title: "A" }] };
 
 test("encodes one JSON object per line", () => {
-  const line = encodeTrayMessage({ type: "state", ...state });
+  const line = stateLine(state);
   assert.ok(line.endsWith("\n"));
   assert.equal(JSON.parse(line).sessions[0].id, "a");
 });
@@ -55,7 +62,7 @@ test("connects to a running helper and sends the state", async () => {
   await h.client.setState(state);
   assert.equal(h.spawns, 0);
   assert.equal(h.client.connected, true);
-  assert.deepEqual(h.sockets[0].lines, [encodeTrayMessage({ type: "state", ...state })]);
+  assert.deepEqual(h.sockets[0].lines, [stateLine(state)]);
 });
 
 test("starts the helper when nothing listens, then sends the state", async () => {
@@ -128,7 +135,7 @@ test("an unchanged state is not written again on the same socket", async () => {
   assert.equal(h.sockets[0].lines.length, 1);
   const changed: TrayState = { scheme: "vscode", sessions: [] };
   await h.client.setState(changed);
-  assert.deepEqual(h.sockets[0].lines, [encodeTrayMessage({ type: "state", ...state }), encodeTrayMessage({ type: "state", ...changed })]);
+  assert.deepEqual(h.sockets[0].lines, [stateLine(state), stateLine(changed)]);
 });
 
 test("a new socket gets the state again even when unchanged", async () => {
@@ -138,7 +145,7 @@ test("a new socket gets the state again even when unchanged", async () => {
   h.clock += 61_000;
   await h.client.setState(state);
   assert.equal(h.sockets.length, 2);
-  assert.deepEqual(h.sockets[1].lines, [encodeTrayMessage({ type: "state", ...state })]);
+  assert.deepEqual(h.sockets[1].lines, [stateLine(state)]);
 });
 
 test("a summary notification carries no session", async () => {
@@ -202,4 +209,23 @@ test("vscodeCliPath finds the CLI next to the app root", () => {
   assert.equal(vscodeCliPath(root, "vscode", () => false), undefined);
   assert.equal(vscodeCliPath("/opt/vscodium/resources/app", "vscodium", () => true), "/opt/vscodium/bin/codium");
   assert.equal(vscodeCliPath(root, "cursor", () => true), undefined);
+});
+
+test("clicks the helper hands back reach onAction; other lines are logged", async () => {
+  const h = harness();
+  await h.client.setState(state);
+  h.sockets[0].lineCb?.(`{"type":"open","session":{"machine":"local","agent":"claude","id":"a"}}`);
+  h.sockets[0].lineCb?.(`{"type":"show"}`);
+  h.sockets[0].lineCb?.(`{"type":"bogus"}`);
+  assert.deepEqual(h.actions, [{ kind: "open", machineId: "local", agent: "claude", id: "a" }, { kind: "show" }]);
+  assert.equal(h.log.length, 1);
+  assert.match(h.log[0], /ignoring line: \{"type":"bogus"\}/);
+});
+
+test("lines of a dropped socket are ignored", async () => {
+  const h = harness();
+  await h.client.setState(state);
+  h.sockets[0].closeCb?.();
+  h.sockets[0].lineCb?.(`{"type":"show"}`);
+  assert.deepEqual(h.actions, []);
 });

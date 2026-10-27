@@ -1,5 +1,6 @@
 import { spawn as spawnProcess } from "node:child_process";
 import { createConnection } from "node:net";
+import { createInterface } from "node:readline";
 import { chmod, copyFile, mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { ensurePrivateDir } from "../connection/sharedDaemon.js";
@@ -30,9 +31,17 @@ export function nodeTrayIo(fallbackDir: string, log: (line: string) => void): Pi
           sock.setEncoding("utf8");
           sock.on("error", (err) => log(`[tray] socket error: ${String(err)}`));
           const closeCbs: (() => void)[] = [];
+          const lineCbs: ((line: string) => void)[] = [];
+          const rl = createInterface({ input: sock });
+          // readline re-emits socket errors; the socket's own handler logs them.
+          rl.on("error", () => {});
+          rl.on("line", (line) => {
+            if (line.trim()) lineCbs.forEach((cb) => cb(line));
+          });
           sock.on("close", () => closeCbs.forEach((cb) => cb()));
           resolve({
             write: (line) => void sock.write(line),
+            onLine: (cb) => void lineCbs.push(cb),
             onClose: (cb) => void closeCbs.push(cb),
             end: () => sock.end(),
           });
