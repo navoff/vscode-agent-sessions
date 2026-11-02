@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 - 2026-11-02
+
+- Hidden, pinned and read marks are saved independently across VS Code
+  windows, so an update in one window cannot erase unrelated marks from
+  another. Existing marks are migrated automatically. A storage failure
+  is reported in the window and in the Agent Sessions output.
+
 ## 0.3.0 - 2026-10-26
 
 - The sessions view now lives in the Explorer, under the files of the

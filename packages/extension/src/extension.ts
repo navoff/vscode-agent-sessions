@@ -18,6 +18,7 @@ import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, write
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
 import { SessionMarks } from "./state/marks.js";
+import { SharedMarksStore } from "./state/sharedMarks.js";
 import { attentionBadge, attentionRows, attentionSnapshot, AttentionTracker, burstTitle, gainedAttention, notificationPlan, NOTIFY_SETTLE_MS, toastText } from "./state/attention.js";
 import { markKey } from "./state/marks.js";
 import { CLAIM_MAX_AGE_MS, claimNotification, pruneNotifyClaims } from "./tray/notifyClaim.js";
@@ -34,6 +35,7 @@ import { SessionsTreeProvider } from "./tree/treeProvider.js";
 const LOCAL_ID = "local";
 const FILTER_KEY = "agentSessions.filter";
 const AUTO_RESTART_INTERVAL_MS = 60_000;
+let activeMarksStore: SharedMarksStore | undefined;
 // VS Code prefixes the view type of a webview panel in its tab input.
 const CLAUDE_PANEL_VIEW_TYPE = "claudeVSCodePanel";
 
@@ -64,7 +66,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   };
 
-  const marks = new SessionMarks(context.globalState);
+  // globalState writes a whole snapshot of the extension's data. Concurrent
+  // windows can overwrite unrelated marks, so it is only a migration source.
+  let refreshMarks = () => {};
+  const reportMarksError = (error: unknown) => {
+    appendLog(`[marks] ${String(error)}`);
+    void vscode.window.showErrorMessage("Agent Sessions: could not save or read session marks. See the Agent Sessions output for details.");
+  };
+  let sharedMarks: SharedMarksStore;
+  try {
+    sharedMarks = await SharedMarksStore.open(join(context.globalStorageUri.fsPath, "marks-v1"), context.globalState, {
+      onChange: () => refreshMarks(),
+      onError: reportMarksError,
+    });
+  } catch (error) {
+    reportMarksError(error);
+    log.dispose();
+    return;
+  }
+  context.subscriptions.push(sharedMarks);
+  activeMarksStore = sharedMarks;
+  const marks = new SessionMarks(sharedMarks);
   const store = new SessionStore(marks);
   const attention = new AttentionTracker(marks);
   const claimsDir = join(context.globalStorageUri.fsPath, "notified");
@@ -232,6 +254,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tree.refresh();
     scheduleAttention();
   };
+  refreshMarks = refresh;
 
   // A session whose tab is in front of the user in this focused window is
   // being read, so activity that arrives meanwhile, or that the user comes
@@ -704,4 +727,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 }
 
-export function deactivate(): void {}
+export async function deactivate(): Promise<void> {
+  try {
+    await activeMarksStore?.flush();
+  } finally {
+    activeMarksStore?.dispose();
+    activeMarksStore = undefined;
+  }
+}
