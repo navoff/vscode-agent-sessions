@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { isValidSessionId, sessionTitleProblem, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
@@ -36,6 +37,25 @@ export interface CommandDeps {
 
 const CLAUDE_EXTENSION = "anthropic.claude-code";
 const CODEX_EXTENSION = "openai.chatgpt";
+// Exact releases reported in https://github.com/openai/codex/issues/59921.
+// Do not assume that later releases have the same startup regression.
+const CODEX_UI_STARTUP_VERSIONS = new Set(["26.1021.22027", "26.51021.22027"]);
+const CODEX_UI_STARTUP_ISSUE = "https://github.com/openai/codex/issues/59921";
+const warnedCodexVersions = new Set<string>();
+
+/** Codex's asynchronous webview timeout is not returned by its open commands. */
+function warnAboutCodexStartup(): void {
+  const version: unknown = vscode.extensions.getExtension(CODEX_EXTENSION)?.packageJSON.version;
+  if (typeof version !== "string" || !CODEX_UI_STARTUP_VERSIONS.has(version) || warnedCodexVersions.has(version)) return;
+  warnedCodexVersions.add(version);
+  // Keep opening the session; this build can also start successfully.
+  void vscode.window.showWarningMessage(
+    `Codex ${version} has a reported UI startup bug. If you see "Codex could not start its user interface", this is a known issue in the Codex extension itself and can also happen without AI Agent Sessions. Try a different Codex extension version.`,
+    "View Issue",
+  ).then((pick) => {
+    if (pick === "View Issue") void vscode.env.openExternal(vscode.Uri.parse(CODEX_UI_STARTUP_ISSUE));
+  });
+}
 
 function sessionOf(node: TreeNode | undefined): { machineId: string; session: SessionInfo } | undefined {
   if (!node || node.kind !== "session") return undefined;
@@ -248,6 +268,7 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
     if (!vscode.extensions.getExtension(CODEX_EXTENSION) && !(await offerInstall(CODEX_EXTENSION, "Codex"))) return;
+    warnAboutCodexStartup();
     await openCodexThread(session.id);
   } else {
     void vscode.window.showInformationMessage(`Opening ${session.agent} sessions is not supported yet.`);
@@ -264,9 +285,16 @@ export async function startNewSession(agent: AgentKind): Promise<void> {
     await vscode.commands.executeCommand("claude-vscode.editor.open");
   } else if (agent === "codex") {
     if (!vscode.extensions.getExtension(CODEX_EXTENSION) && !(await offerInstall(CODEX_EXTENSION, "Codex"))) return;
+    warnAboutCodexStartup();
     const target = vscode.workspace.getConfiguration("agentSessions").get<string>("codex.openTarget", "sidebar");
     if (target === "panel") {
-      await vscode.commands.executeCommand("chatgpt.newCodexPanel");
+      // Codex's new-panel command reuses a fixed URI, even after that tab
+      // navigated to a thread. Give each new chat its own editor resource.
+      const uri = vscode.Uri.parse(`openai-codex://route/extension/panel/new?nonce=${randomUUID()}`);
+      await vscode.commands.executeCommand("vscode.openWith", uri, CODEX_EDITOR_VIEW_TYPE, {
+        preview: false,
+        preserveFocus: false,
+      });
       return;
     }
     await vscode.commands.executeCommand("chatgpt.openSidebar");
