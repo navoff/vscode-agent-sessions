@@ -122,12 +122,16 @@ export function projectContextValue(node: ProjectNode): string {
   return ["project", node.hidden ? "hidden" : "visible", node.unread ? "unread" : "read"].join(":");
 }
 
-// Pinned first, then by creation time, newest first: a session keeps its
-// place in the folder whatever its activity.
+// Pinned first, then unpinned running sessions. Each group is ordered by
+// latest update, newest first.
 function sortRows(rows: SessionRow[]): SessionRow[] {
   return [...rows].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return b.session.createdAt - a.session.createdAt;
+    if (!a.pinned) {
+      const running = Number(b.session.status === "running") - Number(a.session.status === "running");
+      if (running !== 0) return running;
+    }
+    return b.session.updatedAt - a.session.updatedAt;
   });
 }
 

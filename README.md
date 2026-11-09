@@ -91,7 +91,7 @@ agents' own session stores instead and stays out of their way.
 | Rename | The pencil button that appears on a Claude Code or Codex session under the pointer, to the left of the eye, "Rename Session…" in the context menu, or F2 in the focused list asks for a new name and has the agent itself write it, see below. |
 | Move to another folder | Drag a Claude Code or Codex session, or several selected ones, onto a folder of the same machine, or onto a session in it; the drop asks once and moves them, see below. Opening a session of another folder also offers to move it to the folder of the window. |
 | See what a session is about | Hover a session: the tooltip shows its full title, the start of the first prompt and the time of the last update. |
-| Order | Sessions in a folder go by creation time, newest first, with pinned ones above the rest. Activity does not move a session. |
+| Order | Sessions in a folder show pinned ones first, then other running sessions, then the rest. Each group goes by last update, most recent first. |
 | Folder actions | A folder's context menu marks the sessions shown under it read or unread, deletes them, or hides the folder as a whole. Hiding a folder does not change the marks of its sessions: unhide it and a session hidden on its own stays hidden. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |

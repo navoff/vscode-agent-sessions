@@ -58,8 +58,8 @@ test("buildTree groups by machine and project, sorts and filters", () => {
   assert.deepEqual(tree.map((m) => m.machine.id), ["local", "hz", "hz2"]);
   const projects = tree[0].projects;
   assert.deepEqual(projects.map((p) => p.label), ["~/work/b", "~/work/a"]);
-  // By creation time, newest first: neither activity nor a running turn moves a session.
-  assert.deepEqual(projects[1].sessions.map((n) => n.row.session.id), ["new", "old", "run"]);
+  // Running sessions precede idle ones, then the latest update orders each group.
+  assert.deepEqual(projects[1].sessions.map((n) => n.row.session.id), ["run", "old", "new"]);
   assert.equal(tree[1].projects[0].sessions.length, 1);
   assert.equal(tree[1].projects[0].label, "~/x");
   assert.equal(tree[2].projects[0].label, "/srv/app");
@@ -96,12 +96,14 @@ test("projects without workspace match are ordered by their newest session", () 
   assert.deepEqual(projects[0].sessions.map((n) => n.row.session.id), ["p1run", "p1new"]);
 });
 
-test("pinned sessions come first in their folder, each group is ordered by creation time", () => {
+test("sessions sort by pinned, then unpinned running, then latest update within each group", () => {
   const rows = new Map<string, SessionRow[]>([
     ["local", [
-      row("local", s("run", { status: "running", createdAt: 5, updatedAt: 5 })),
+      row("local", s("run", { status: "running", createdAt: 5, updatedAt: 60 })),
+      row("local", s("runNew", { status: "running", createdAt: 50, updatedAt: 50 })),
       row("local", s("new", { createdAt: 500, updatedAt: 500 })),
-      row("local", s("pinOld", { createdAt: 10, updatedAt: 10 }), { pinned: true }),
+      row("local", s("unknown", { status: "unknown", createdAt: 1000, updatedAt: 100 })),
+      row("local", s("pinOld", { createdAt: 10, updatedAt: 700 }), { pinned: true }),
       row("local", s("pinRun", { status: "running", createdAt: 1, updatedAt: 1 }), { pinned: true }),
       row("local", s("pinNew", { createdAt: 400, updatedAt: 400 }), { pinned: true }),
       row("local", s("other", { cwd: "/home/u/work/c", updatedAt: 900 })),
@@ -110,7 +112,7 @@ test("pinned sessions come first in their folder, each group is ordered by creat
   ]);
   const tree = buildTree([local], rows, { agents: undefined, showRemote: true, workspaceOnly: false, showHidden: false }, { home: "/home/u", workspaceFolders: [] });
   const a = tree[0].projects.find((p) => p.cwd === "/home/u/work/a")!;
-  assert.deepEqual(a.sessions.map((n) => n.row.session.id), ["pinNew", "pinOld", "pinRun", "new", "run"]);
+  assert.deepEqual(a.sessions.map((n) => n.row.session.id), ["pinOld", "pinNew", "pinRun", "run", "runNew", "new", "unknown"]);
   // A pin does not move its folder.
   assert.deepEqual(tree[0].projects.map((p) => p.label), ["~/work/c", "~/work/a", "~/work/d"]);
 });
