@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 - 2026-11-17
 
 - A Codex session that the Codex plugin of this window keeps loaded can
   now be deleted: "Reload Window and Delete" closes its tabs, reloads the
