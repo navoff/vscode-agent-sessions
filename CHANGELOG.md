@@ -1,7 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-11-17
 
+- Hidden, pinned and read marks are saved independently across VS Code
+  windows, so an update in one window cannot erase unrelated marks from
+  another. Existing marks are migrated automatically. A storage failure
+  is reported in the window and in the Agent Sessions output.
+- Pinned sessions stay on top, followed by running sessions and then the
+  rest; each group is sorted by its latest update, so a fresh reply moves
+  its session above older activity.
+- Each new Codex panel opens in a tab of its own instead of reusing an
+  open conversation. Codex 26.1021.22027, which has a reported UI startup
+  bug, gets a one-time warning with a link to the upstream issue.
 - A click on a notification or in the tray menu no longer ends with "this
   session is not in the list of this window" when the last focused window
   is a Remote-SSH one. The tray helper now hands the click to a local
@@ -21,13 +31,6 @@
   on the session's folder, as it does for Claude Code, unless the window
   that got the click already shows the session. With no window on the
   folder the session opens where it was clicked.
-
-## 0.3.1 - 2026-11-02
-
-- Hidden, pinned and read marks are saved independently across VS Code
-  windows, so an update in one window cannot erase unrelated marks from
-  another. Existing marks are migrated automatically. A storage failure
-  is reported in the window and in the Agent Sessions output.
 
 ## 0.3.0 - 2026-10-26
 
