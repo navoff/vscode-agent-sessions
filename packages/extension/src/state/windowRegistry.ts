@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 /**
  * Every local window records its folders in `<dir>/<pid>.json`, keyed by the
@@ -55,6 +55,18 @@ function parseRecord(text: string): WindowRecord | undefined {
   if (!Array.isArray(folders) || !folders.every((f) => typeof f === "string")) return undefined;
   if (workspaceFile !== undefined && typeof workspaceFile !== "string") return undefined;
   return { pid, folders, updatedAt, ...(workspaceFile ? { workspaceFile } : {}) };
+}
+
+/** The record of the window whose extension host is `pid`, if it wrote one. */
+export async function readWindowRecord(dir: string, pid: number): Promise<WindowRecord | undefined> {
+  const text = await readFile(join(dir, `${pid}.json`), "utf8").catch(() => undefined);
+  return text === undefined ? undefined : parseRecord(text);
+}
+
+/** How a window is called in messages: its workspace file, or its first folder. */
+export function windowLabel(record: WindowRecord): string {
+  if (record.workspaceFile) return basename(record.workspaceFile).replace(/\.code-workspace$/, "");
+  return basename(record.folders[0] ?? String(record.pid));
 }
 
 export interface FindWindowOptions {

@@ -163,9 +163,13 @@ machine that holds the session, so it also works for remote machines:
   its subagent transcripts.
 - Codex: `codex delete --force <id>` lets Codex update its own indexes.
 
-A running session cannot be deleted. A session that is currently loaded in
-the Codex plugin cannot be deleted either, because Codex holds a lock on it
-until the window is reloaded; the error message says so.
+A running session cannot be deleted. A Codex session loaded in the Codex
+plugin cannot be deleted at once either: Codex holds a lock on it until its
+window reloads, or for about 3 hours after its last tab there is closed.
+When that window is the one you delete from, the extension offers "Reload
+Window and Delete", which closes the session's tabs, reloads the window and
+deletes the session right after; it warns first if that would stop a
+running session. For a session held by another window, the error names it.
 
 ## Remote machines
 

@@ -7,7 +7,7 @@ import { buildSync } from "esbuild";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { openSession, startNewSession } from "../commands.js";
+import type { offerReloadAndDelete, openSession, startNewSession } from "../commands.js";
 
 interface WindowStub { pid: number; workspaceFile?: string; folders: string[]; updatedAt: number }
 const deps = (bound: Record<string, string> = {}, windows: WindowStub[] = [], pending: string[] = []) =>
@@ -46,14 +46,15 @@ const codexTab = (path: string, query = "") => ({
 function commands(target: "panel" | "sidebar", failure?: Error, version = "26.51007.21434", choice?: string, tabs: unknown[] = [], folders: string[] = []) {
   const calls: { id: string; args: unknown[] }[] = [];
   const warnings: { message: string; actions: string[] }[] = [];
+  const closed: unknown[] = [];
   const links: string[] = [];
   const vscode = {
     extensions: { getExtension: () => ({ packageJSON: { version } }) },
     TabInputCustom,
     window: {
-      tabGroups: { all: [{ tabs }] },
-      showWarningMessage: async (message: string, ...actions: string[]) => {
-        warnings.push({ message, actions });
+      tabGroups: { all: [{ tabs }], close: async (t: unknown[]) => { closed.push(...t); return true; } },
+      showWarningMessage: async (message: string, ...actions: unknown[]) => {
+        warnings.push({ message, actions: actions.filter((a): a is string => typeof a === "string") });
         return choice;
       },
     },
@@ -71,9 +72,9 @@ function commands(target: "panel" | "sidebar", failure?: Error, version = "26.51
       if (failure && id === "vscode.openWith") throw failure;
     } },
   };
-  const module = { exports: {} as { startNewSession: typeof startNewSession; openSession: typeof openSession } };
+  const module = { exports: {} as { startNewSession: typeof startNewSession; openSession: typeof openSession; offerReloadAndDelete: typeof offerReloadAndDelete } };
   runInNewContext(bundle, { module, exports: module.exports, require: (id: string) => id === "vscode" ? vscode : require(id) });
-  return { start: module.exports.startNewSession, open: module.exports.openSession, calls, warnings, links };
+  return { start: module.exports.startNewSession, open: module.exports.openSession, offer: module.exports.offerReloadAndDelete, calls, warnings, links, closed };
 }
 
 test("each new Codex panel opens a distinct resource instead of reusing an existing chat", async () => {
@@ -214,4 +215,34 @@ test("opening a Codex session from the tree of this window does not hand it over
   await open(deps({}, [owner], pending), "local", codexSession(ID, sessionFolder));
   assert.deepEqual(pending, []);
   assert.deepEqual(ids(calls), ["vscode.openWith"]);
+});
+
+function holdDeps(remembered: string[][], running: string[] = []) {
+  return {
+    ...(deps({ [ID]: "openai-codex://route/extension/panel/new?nonce=a" }) as object),
+    runningHere: async () => running,
+    rememberPendingDeletes: async (ids: string[]) => { remembered.push(ids); },
+  } as unknown as Parameters<typeof offerReloadAndDelete>[0];
+}
+
+test("a Codex session held by this window is deleted after a reload, its tabs closed first", async () => {
+  const newChat = codexTab("/extension/panel/new", "?nonce=a");
+  const other = codexTab("/local/other");
+  const { offer, calls, closed, warnings } = commands("panel", undefined, undefined, "Reload Window and Delete", [newChat, other, codexTab(`/local/${ID}`)]);
+  const remembered: string[][] = [];
+  await offer(holdDeps(remembered, ["Busy session"]), [codexSession(ID)], 939095);
+  assert.deepEqual(remembered, [[ID]]);
+  assert.equal(closed.length, 2);
+  assert.ok(!closed.includes(other));
+  assert.deepEqual(ids(calls), ["workbench.action.reloadWindow"]);
+  assert.ok(warnings[0].message.includes(`"Busy session"`));
+});
+
+test("declining the reload keeps the session and the window as they are", async () => {
+  const { offer, calls, closed } = commands("panel", undefined, undefined, undefined, [codexTab(`/local/${ID}`)]);
+  const remembered: string[][] = [];
+  await offer(holdDeps(remembered), [codexSession(ID)], 939095);
+  assert.deepEqual(remembered, []);
+  assert.deepEqual(closed, []);
+  assert.deepEqual(calls, []);
 });

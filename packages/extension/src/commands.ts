@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
-import { isValidSessionId, sessionTitleProblem, type AgentKind, type SessionInfo } from "@agent-sessions/core";
+import { codexHolderFromError, isValidSessionId, sessionTitleProblem, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { isSafeSessionId, type SessionStore } from "./state/sessionStore.js";
 import { applyFilterPicks, buildFilterItems, type FilterPickId, type FilterState } from "./tree/filterPicker.js";
 import type { ProjectNode, SessionNode, TreeNode } from "./tree/treeModel.js";
@@ -35,6 +35,12 @@ export interface CommandDeps {
   sshHost(machineId: string): string | undefined;
   /** The threads of Codex new-chat tabs in this window. */
   codexTabs: Pick<CodexTabTracker, "tabOf">;
+  /** Where the Codex process `pid` runs: under this window, under another VS Code window (its name), or neither. */
+  codexHolder(pid: number): Promise<{ window: "this" } | { window: "other"; name: string } | undefined>;
+  /** Titles of the running sessions a reload of this window would stop; `codexPid` is this window's Codex process. */
+  runningHere(codexPid: number): Promise<string[]>;
+  /** Records Codex sessions for this window to delete right after its next reload. */
+  rememberPendingDeletes(ids: string[]): Promise<void>;
   log: vscode.OutputChannel;
 }
 
@@ -93,15 +99,46 @@ export function codexNewChatTabKey(tab: vscode.Tab | undefined): string | undefi
   return uri && !codexTabSessionId(uri.path) ? uri.toString() : undefined;
 }
 
-/** The editor tab already showing the Codex session, if any. */
-function codexTabOf(sessionId: string, newChatTab: string | undefined): vscode.Tab | undefined {
+/** The editor tabs showing the Codex session. */
+function codexTabsOf(sessionId: string, newChatTab: string | undefined): vscode.Tab[] {
+  const tabs: vscode.Tab[] = [];
   for (const group of vscode.window.tabGroups.all) {
     for (const tab of group.tabs) {
       const uri = codexTabUri(tab);
-      if (uri && (codexTabSessionId(uri.path) === sessionId || (newChatTab !== undefined && uri.toString() === newChatTab))) return tab;
+      if (uri && (codexTabSessionId(uri.path) === sessionId || (newChatTab !== undefined && uri.toString() === newChatTab))) tabs.push(tab);
     }
   }
-  return undefined;
+  return tabs;
+}
+
+/** The editor tab already showing the Codex session, if any. */
+function codexTabOf(sessionId: string, newChatTab: string | undefined): vscode.Tab | undefined {
+  return codexTabsOf(sessionId, newChatTab)[0];
+}
+
+const RELOAD_AND_DELETE = "Reload Window and Delete";
+
+/**
+ * Codex sessions that the Codex of this window keeps loaded can be deleted
+ * only once the window has reloaded; offer that. Their tabs are closed
+ * first, or the reload would bring them back and load them again.
+ */
+export async function offerReloadAndDelete(deps: CommandDeps, held: readonly SessionInfo[], codexPid: number): Promise<void> {
+  const one = held.length === 1;
+  const titles = held.map((s) => `"${s.title}"`).join(", ");
+  const running = await deps.runningHere(codexPid);
+  const stops = running.length > 0 ? ` Reloading stops what is running in this window: ${running.map((t) => `"${t}"`).join(", ")}.` : "";
+  const pick = await vscode.window.showWarningMessage(
+    `${titles} ${one ? "is" : "are"} open in Codex in this window. Codex lets a session go only when its window reloads, or hours after its last tab is closed, so ${one ? "it" : "they"} cannot be deleted now.${stops}`,
+    { modal: true },
+    RELOAD_AND_DELETE,
+  );
+  if (pick !== RELOAD_AND_DELETE) return;
+  await deps.rememberPendingDeletes(held.map((s) => s.id));
+  const tabs = held.flatMap((s) => codexTabsOf(s.id, deps.codexTabs.tabOf(s.id)));
+  if (tabs.length > 0) await vscode.window.tabGroups.close(tabs);
+  deps.log.appendLine(`[local] reloading the window to delete ${held.map((s) => `codex:${s.id}`).join(", ")}`);
+  await vscode.commands.executeCommand("workbench.action.reloadWindow");
 }
 
 async function openCodexThread(deps: CommandDeps, sessionId: string): Promise<void> {
@@ -527,11 +564,12 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
     if (candidates.length === 0) return;
     const titles = candidates.map((n) => `"${n.row.session.title}"`);
     const shown = titles.length > 5 ? `${titles.slice(0, 5).join(", ")} and ${titles.length - 5} more` : titles.join(", ");
-    const closeFirst = candidates.some((n) => n.row.session.agent === "codex") ? " Close Codex sessions first if they are open." : "";
     const what = candidates.length === 1 ? `Delete ${shown} permanently?` : `Delete ${candidates.length} sessions permanently? ${shown}.`;
-    const pick = await vscode.window.showWarningMessage(`${what} This cannot be undone.${closeFirst}`, { modal: true }, "Delete");
+    const pick = await vscode.window.showWarningMessage(`${what} This cannot be undone.`, { modal: true }, "Delete");
     if (pick !== "Delete") return;
     const failed: string[] = [];
+    const heldHere: SessionInfo[] = [];
+    let codexPid = 0;
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: candidates.length === 1 ? `Deleting ${shown}` : `Deleting ${candidates.length} sessions` }, async () => {
       for (const n of candidates) {
         const { machineId } = n;
@@ -543,12 +581,21 @@ export function registerSessionCommands(context: vscode.ExtensionContext, deps: 
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           deps.log.appendLine(`[${machineId}] delete ${session.agent}:${session.id} failed: ${msg}`);
-          failed.push(`"${session.title}": ${msg}`);
+          const holder = machineId === "local" && session.agent === "codex" ? codexHolderFromError(msg) : undefined;
+          const where = holder === undefined ? undefined : await deps.codexHolder(holder);
+          if (holder !== undefined && where?.window === "this") {
+            heldHere.push(session);
+            codexPid = holder;
+            continue;
+          }
+          const why = where?.window === "other" ? `it is open in Codex in the VS Code window "${where.name}", which keeps it until it reloads; reload that window, then delete it` : msg;
+          failed.push(`"${session.title}": ${why}`);
         }
       }
     });
     if (failed.length > 0) void vscode.window.showErrorMessage(`Could not delete ${failed.join("; ")}`);
     deps.refresh();
+    if (heldHere.length > 0) await offerReloadAndDelete(deps, heldHere, codexPid);
   });
   reg("agentSessions.refresh", () => deps.refresh());
   reg("agentSessions.showLog", () => deps.log.show());

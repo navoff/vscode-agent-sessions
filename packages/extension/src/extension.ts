@@ -3,7 +3,7 @@ import { existsSync, watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { AgentKind, SessionInfo } from "@agent-sessions/core";
+import { codexHolderFromError, codexThreadHolder, type AgentKind, type SessionInfo } from "@agent-sessions/core";
 import { clearPendingOpen, PROTOCOL_VERSION, readPendingOpen } from "@agent-sessions/daemon";
 import { daemonVersionAction, protocolMismatchAction } from "./connection/daemonUpgrade.js";
 import { isProtocolMismatch, MachineConnection, type ProcessFactory } from "./connection/machineConnection.js";
@@ -13,7 +13,8 @@ import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
 import { CODEX_EDITOR_VIEW_TYPE, codexNewChatTabKey, confirmAndMoveSessions, openSession, raiseThisWindow, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
 import { canonical, claudeFindsSession, isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
-import { findWindowForFolder, removeWindowRecord, writeWindowRecord } from "./state/windowRegistry.js";
+import { findWindowForFolder, readWindowRecord, removeWindowRecord, windowLabel, writeWindowRecord } from "./state/windowRegistry.js";
+import { duePendingDeletes, PENDING_DELETES_KEY } from "./state/pendingDeletes.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
 import { registerMachineCommands } from "./machines/machinesUi.js";
 import { remoteDaemonPath } from "./machines/prepare.js";
@@ -48,6 +49,11 @@ declare const __DAEMON_VERSION__: string | undefined;
 const BUNDLED_DAEMON_VERSION = typeof __DAEMON_VERSION__ === "string" ? __DAEMON_VERSION__ : undefined;
 
 /** Whether process `pid` exists; EPERM means it does, under another user. */
+/** Codex's directory on this machine, as the local daemon reads it. */
+function codexHome(): string {
+  return process.env.CODEX_HOME ?? join(homedir(), ".codex");
+}
+
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -648,6 +654,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return c ? c.pendingOpen(session) : Promise.reject(new Error("the machine is not connected"));
     },
     codexTabs,
+    codexHolder: async (pid) => {
+      const host = await parentPid(pid);
+      if (host === undefined) return undefined;
+      // The Codex plugin runs its app-server as a child of the extension host, where this extension runs too.
+      if (host === process.pid) return { window: "this" };
+      const record = windowRecordsWanted ? await readWindowRecord(windowsDir, host) : undefined;
+      return record ? { window: "other", name: windowLabel(record) } : undefined;
+    },
+    runningHere: async (codexPid) => {
+      const titles: string[] = [];
+      for (const r of store.rows(LOCAL_ID)) {
+        if (r.session.status !== "running") continue;
+        if (r.session.agent === "claude" && r.session.live && (await parentPid(r.session.live.pid)) === process.pid) titles.push(r.session.title);
+        if (r.session.agent === "codex" && (await codexThreadHolder(codexHome(), r.session.id)) === codexPid) titles.push(r.session.title);
+      }
+      return titles;
+    },
+    rememberPendingDeletes: async (ids) => {
+      await context.workspaceState.update(PENDING_DELETES_KEY, { ids, at: Date.now() });
+    },
     sshHost: (machineId) => machines.machines.find((m) => m.id === machineId)?.sshHost,
     windowFor: async (cwd) => {
       if (!windowRecordsWanted) return undefined;
@@ -655,6 +681,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   };
   registerSessionCommands(context, sessionDeps);
+
+  // Codex sessions this window reloaded to delete: the reload ended the
+  // Codex process that kept them loaded. The old process may take a moment
+  // to go, so a session still held is tried again for a few seconds.
+  const deletePendingCodexSessions = async () => {
+    const ids = duePendingDeletes(context.workspaceState.get(PENDING_DELETES_KEY), Date.now());
+    await context.workspaceState.update(PENDING_DELETES_KEY, undefined);
+    if (ids.length === 0) return;
+    if (!listedMachines.has(LOCAL_ID)) await whenListed(LOCAL_ID, 30_000);
+    const failed: string[] = [];
+    const deleted: string[] = [];
+    for (const id of ids) {
+      const session = store.find(LOCAL_ID, `codex:${id}`);
+      if (!session) continue;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const conn = connections.get(LOCAL_ID);
+          if (!conn) throw new Error("this machine is not connected");
+          await conn.deleteSession("codex", id);
+          appendLog(`[${LOCAL_ID}] deleted codex:${id} after reloading the window`);
+          store.forget(LOCAL_ID, session);
+          deleted.push(`"${session.title}"`);
+          break;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (codexHolderFromError(msg) !== undefined && attempt < 10) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            continue;
+          }
+          appendLog(`[${LOCAL_ID}] delete codex:${id} after reloading the window failed: ${msg}`);
+          failed.push(`"${session.title}": ${msg}`);
+          break;
+        }
+      }
+    }
+    refresh();
+    if (deleted.length > 0) void vscode.window.showInformationMessage(`Agent Sessions: deleted ${deleted.join(", ")}.`);
+    if (failed.length > 0) void vscode.window.showErrorMessage(`Could not delete ${failed.join("; ")}`);
+  };
+  deletePendingCodexSessions().catch((err) => appendLog(`[${LOCAL_ID}] deleting sessions after a reload failed: ${String(err)}`));
   // A session asked for by a vscode:// URI or a click in the tray. A URI can
   // start the extension (onUri) and come before the machine's first list,
   // so a session not found yet is looked up again once the list is in.

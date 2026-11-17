@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { readSessionIndex } from "../codex/sessionIndex.js";
 import { listRolloutFiles } from "../codex/discovery.js";
 import { AppServerExitError, type AppServerRequest } from "../codex/appServer.js";
+import { codexHeldError, codexHolderFromError } from "../codex/holder.js";
 import { CodexProvider, type CommandResult, type CommandRunner } from "../codex/provider.js";
 
 const meta = (payload: Record<string, unknown>) => JSON.stringify({ type: "session_meta", payload });
@@ -207,7 +208,7 @@ test("delete refuses a thread whose writer lock is held and names the process", 
   const r = recorder([]);
   const p = new CodexProvider({ codexDir: dir, runCommand: r.run, procLocksPath: locks });
   await p.snapshot();
-  await assert.rejects(() => p.delete(CID), /open in Codex \(process 601322\).*Close it in Codex/);
+  await assert.rejects(() => p.delete(CID), /open in Codex \(process 601322\)\. Codex lets it go when the VS Code window/);
   assert.equal(r.calls.length, 0);
   // An unheld lock file does not block deletion.
   await writeFile(locks, "");
@@ -391,4 +392,10 @@ test("move refuses a bad id or target, a running thread and one whose writer loc
   const held = new CodexProvider({ codexDir: dir, appServer: s.request, procLocksPath: locks });
   await assert.rejects(() => held.move(CID, target), /open in Codex \(process 601322\)/);
   assert.equal(s.calls.length, 0);
+});
+
+test("the pid of a held-thread error is read back from its text, and only from such text", () => {
+  assert.equal(codexHolderFromError(codexHeldError(939095)), 939095);
+  assert.equal(codexHolderFromError(`Could not delete "x": ${codexHeldError(12)}`), 12);
+  assert.equal(codexHolderFromError("codex delete failed (exit 1)"), undefined);
 });

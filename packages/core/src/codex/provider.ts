@@ -4,12 +4,12 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
-import { fileLockHolder } from "../util/fileLock.js";
 import { isValidSessionId } from "../util/sessionId.js";
 import { normalizeSessionTitle } from "../util/sessionTitle.js";
 import { guardWatcher } from "../util/watch.js";
 import { AppServerExitError, appServerRequest, type AppServerRequest } from "./appServer.js";
 import { listRolloutFiles } from "./discovery.js";
+import { codexHeldError, codexThreadHolder } from "./holder.js";
 import { readRolloutInfo, type CodexRolloutInfo } from "./rollout.js";
 import { readSessionIndex } from "./sessionIndex.js";
 
@@ -178,12 +178,8 @@ export class CodexProvider implements SessionProvider {
     if (await this.isRunningNow(id)) throw new Error("the session is running, wait until it finishes or stop it before deleting");
     // A Codex process that has the thread open (the VS Code plugin, a TUI)
     // holds its writer lock, and codex delete fails with a truncated error.
-    const holder = await fileLockHolder(join(this.codexDir, "thread-writer-locks", `${id.toLowerCase()}.lock`), this.procLocksPath);
-    if (holder !== undefined) {
-      throw new Error(
-        `the session is open in Codex (process ${holder}). Close it in Codex, or reload the VS Code window that has it open, then try again`,
-      );
-    }
+    const holder = await codexThreadHolder(this.codexDir, id, this.procLocksPath);
+    if (holder !== undefined) throw new Error(codexHeldError(holder));
     const opts = { env: { ...this.env, CODEX_HOME: this.codexDir }, timeoutMs: this.deleteTimeoutMs };
     const result = await this.withCodex(
       // --force skips the interactive confirmation; the user confirmed in VS Code.
@@ -236,12 +232,8 @@ export class CodexProvider implements SessionProvider {
     if (!isAbsolute(cwd)) throw new Error(`${JSON.stringify(cwd.slice(0, 200))} is not an absolute path`);
     if (!(await stat(cwd).catch(() => undefined))?.isDirectory()) throw new Error(`${cwd} is not an existing folder`);
     if (await this.isRunningNow(id)) throw new Error("the session is running, wait until it finishes or stop it before moving");
-    const holder = await fileLockHolder(join(this.codexDir, "thread-writer-locks", `${id.toLowerCase()}.lock`), this.procLocksPath);
-    if (holder !== undefined) {
-      throw new Error(
-        `the session is open in Codex (process ${holder}). Close it in Codex, or reload the VS Code window that has it open, then try again`,
-      );
-    }
+    const holder = await codexThreadHolder(this.codexDir, id, this.procLocksPath);
+    if (holder !== undefined) throw new Error(codexHeldError(holder));
     await this.appServerCall("thread/resume", { threadId: id, cwd, excludeTurns: true }, this.moveTimeoutMs);
     // A Codex that does not record the directory leaves the session where it was.
     if ((await this.recordedCwd(id)) !== cwd) throw new Error("Codex did not record the new folder; its version may be too old for that");

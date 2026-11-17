@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- A Codex session that the Codex plugin of this window keeps loaded can
+  now be deleted: "Reload Window and Delete" closes its tabs, reloads the
+  window and deletes the session right after, warning first about running
+  sessions the reload would stop. Codex lets a session go only when its
+  window reloads, or about 3 hours after its last tab is closed, so the
+  former advice to close it in Codex did not help. A session held by
+  another window is refused with that window's name.
+
 ## 0.4.0 - 2026-11-17
 
 - Hidden, pinned and read marks are saved independently across VS Code
