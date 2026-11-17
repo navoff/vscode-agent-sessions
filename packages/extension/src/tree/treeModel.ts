@@ -153,6 +153,15 @@ function newestUpdatedAt(sessions: SessionNode[]): number {
   return sessions.reduce((m, n) => Math.max(m, n.row.session.updatedAt), 0);
 }
 
+/**
+ * The project of a window: its first folder, where Claude Code and Codex
+ * start the sessions of the window. The folder of a .code-workspace file is
+ * not it when the file lies outside its folders.
+ */
+export function windowProject(folders: readonly string[]): string | undefined {
+  return folders[0];
+}
+
 export function buildTree(
   machines: MachineInput[],
   rowsByMachine: Map<string, SessionRow[]>,

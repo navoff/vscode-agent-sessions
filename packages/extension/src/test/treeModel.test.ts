@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { SessionInfo } from "@agent-sessions/core";
-import { buildTree, machineContextValue, projectContextValue, relativeTime, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, shortenCwd, type MachineInput } from "../tree/treeModel.js";
+import { buildTree, machineContextValue, projectContextValue, relativeTime, sessionContextValue, sessionDescription, sessionIconName, sessionTooltip, shortenCwd, type MachineInput, windowProject } from "../tree/treeModel.js";
 import type { SessionRow } from "../state/sessionStore.js";
 
 const s = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({ agent: "claude", id, title: id, cwd: "/home/u/work/a", createdAt: 1, updatedAt: 1000, status: "idle", ...over });
@@ -284,4 +284,11 @@ test("sessionTooltip has the title, the first prompt unless it repeats the title
   assert.deepEqual(sessionTooltip(s("a", { title: "same", firstPrompt: "same" }), now, fmt), { title: "same", updated: "T1000 (5 min ago)" });
   // The field arrives over the wire unchecked.
   assert.deepEqual(sessionTooltip(s("a", { title: "Title", firstPrompt: 5 as unknown as string }), now, fmt), { title: "Title", updated: "T1000 (5 min ago)" });
+});
+
+test("the project of a window is its first folder, wherever its workspace file lies", () => {
+  // Claude Code and Codex start new sessions there, and New Session compares with it.
+  assert.equal(windowProject(["/home/u/work/_personal/gdrive_migrate", "/home/u/gdrive-sync/notes"]), "/home/u/work/_personal/gdrive_migrate");
+  assert.equal(windowProject(["/home/u/one"]), "/home/u/one");
+  assert.equal(windowProject([]), undefined);
 });

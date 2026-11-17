@@ -8,6 +8,11 @@
   the view. A Claude Code session is told by the client that wrote its
   last message, or that runs it now; a Codex session by the process that
   has it open, or else by the client that started it.
+- The folder shown first in the view is the first folder of the window,
+  where Claude Code and Codex start its sessions, not the folder of the
+  `.code-workspace` file. With the file outside its folders, "New
+  Session…" on that row opened another VS Code window on the file's
+  folder instead of starting the session in this one.
 
 ## 0.4.1 - 2026-11-17
 
