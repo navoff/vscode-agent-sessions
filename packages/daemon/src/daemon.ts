@@ -29,6 +29,7 @@ export function sameSession(a: SessionInfo, b: SessionInfo): boolean {
     a.createdAt === b.createdAt &&
     a.updatedAt === b.updatedAt &&
     a.status === b.status &&
+    a.client === b.client &&
     a.live?.pid === b.live?.pid &&
     a.live?.statusUpdatedAt === b.live?.statusUpdatedAt
   );

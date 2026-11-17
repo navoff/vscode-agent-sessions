@@ -18,12 +18,14 @@ const MAX_TOAST_TITLE = 80;
 /**
  * Sessions that finished work and wait for the user: unread, not running, not
  * hidden, not in a hidden folder, on any machine. The view filter does not apply: it is
- * about what the user is looking at, not about what is waiting. Newest first.
+ * about what the user is looking at, not about what is waiting. A session run
+ * outside VS Code (a CLI, a TUI) is followed there, so it does not wait here;
+ * its row still shows it unread. Newest first.
  */
 export function attentionRows(rowsByMachine: Map<string, SessionRow[]>, isProjectHidden: (machineId: string, cwd: string) => boolean): SessionRow[] {
   const out: SessionRow[] = [];
   for (const rows of rowsByMachine.values()) {
-    for (const r of rows) if (r.unread && r.session.status !== "running" && !r.hidden && !isProjectHidden(r.machineId, r.session.cwd)) out.push(r);
+    for (const r of rows) if (r.unread && r.session.status !== "running" && r.session.client !== "other" && !r.hidden && !isProjectHidden(r.machineId, r.session.cwd)) out.push(r);
   }
   return out.sort((a, b) => b.session.updatedAt - a.session.updatedAt);
 }

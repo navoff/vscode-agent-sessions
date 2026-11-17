@@ -7,6 +7,8 @@ export interface CodexRolloutMeta {
   cwd: string;
   createdAt: number;
   isUserThread: boolean;
+  /** The Codex client that started the thread: `codex_vscode`, `codex-tui`, ... */
+  originator?: string;
 }
 
 export interface CodexRolloutInfo {
@@ -49,12 +51,14 @@ export function parseRolloutMeta(firstLine: string): CodexRolloutMeta | undefine
   const p = r.payload as Record<string, unknown>;
   if (typeof p.id !== "string") return undefined;
   const parsed = typeof p.timestamp === "string" ? Date.parse(p.timestamp) : NaN;
-  return {
+  const meta: CodexRolloutMeta = {
     id: p.id,
     cwd: typeof p.cwd === "string" ? p.cwd : "",
     createdAt: Number.isNaN(parsed) ? 0 : parsed,
     isUserThread: isUserThreadPayload(p),
   };
+  if (typeof p.originator === "string" && p.originator) meta.originator = p.originator;
+  return meta;
 }
 
 export function titleFromUserText(text: string): string | undefined {

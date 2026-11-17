@@ -202,3 +202,8 @@ test("readRolloutInfo takes a changed working directory from the last settings o
   // A message that quotes such a record is not one.
   assert.equal((await info([userMsg(`look: ${settingsApplied("/z")} and "turn_context"`), event("task_complete")]))?.cwd, undefined);
 });
+
+test("parseRolloutMeta keeps the originator of the thread", () => {
+  assert.equal(parseRolloutMeta(meta({ id: "o1", cwd: "/w", originator: "codex-tui" }))?.originator, "codex-tui");
+  assert.ok(!("originator" in parseRolloutMeta(meta({ id: "o2", cwd: "/w" }))!));
+});

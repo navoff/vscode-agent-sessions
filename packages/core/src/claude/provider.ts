@@ -2,12 +2,12 @@ import { watch, type FSWatcher } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
+import type { Disposable, SessionClient, SessionInfo, SessionProvider } from "../types.js";
 import { normalizeFirstPrompt } from "../util/firstPrompt.js";
 import { isValidSessionId } from "../util/sessionId.js";
 import { normalizeSessionTitle } from "../util/sessionTitle.js";
 import { guardWatcher } from "../util/watch.js";
-import { indexSessionFiles, readLastMessageTimestamp } from "./activity.js";
+import { indexSessionFiles, readLastMessage, type LastMessage } from "./activity.js";
 import { readPromptText } from "./firstPrompt.js";
 import { isProcessAlive, readClaudeRegistry } from "./registry.js";
 import { relocateTranscript } from "./relocate.js";
@@ -80,7 +80,13 @@ interface PromptEntry {
 interface ActivityEntry {
   mtimeMs: number;
   size: number;
-  ts: number | undefined;
+  last: LastMessage | undefined;
+}
+
+/** Whether a Claude Code client is the VS Code extension; undefined without one. */
+export function claudeClient(entrypoint: string | undefined): SessionClient | undefined {
+  if (!entrypoint) return undefined;
+  return entrypoint === "claude-vscode" ? "vscode" : "other";
 }
 
 export class ClaudeProvider implements SessionProvider {
@@ -119,12 +125,14 @@ export class ClaudeProvider implements SessionProvider {
     const files = await indexSessionFiles(join(this.claudeDir, "projects"));
     const seen = new Set<string>();
     const updated = new Map<string, number>();
+    const entrypoints = new Map<string, string>();
     const prompts = new Map<string, string>();
     for (const s of sessions) {
       const path = files.get(s.sessionId);
       if (!path) continue;
-      const ts = await this.messageTime(path);
-      if (ts !== undefined) updated.set(s.sessionId, ts);
+      const last = await this.lastMessage(path);
+      if (last !== undefined) updated.set(s.sessionId, last.timestamp);
+      if (last?.entrypoint) entrypoints.set(s.sessionId, last.entrypoint);
       const prompt = s.firstPrompt ? await this.promptText(path, s.firstPrompt) : undefined;
       if (prompt !== undefined) prompts.set(s.sessionId, prompt);
       seen.add(path);
@@ -146,6 +154,9 @@ export class ClaudeProvider implements SessionProvider {
       const firstPrompt = normalizeFirstPrompt(prompts.get(s.sessionId) ?? s.firstPrompt);
       if (firstPrompt) info.firstPrompt = firstPrompt;
       if (live) info.live = { pid: live.pid, statusUpdatedAt: live.statusUpdatedAt };
+      // A live process says who runs the session now; otherwise its last message says who ran it.
+      const client = claudeClient(live?.entrypoint ?? entrypoints.get(s.sessionId));
+      if (client) info.client = client;
       return info;
     });
   }
@@ -239,14 +250,14 @@ export class ClaudeProvider implements SessionProvider {
     return text;
   }
 
-  private async messageTime(path: string): Promise<number | undefined> {
+  private async lastMessage(path: string): Promise<LastMessage | undefined> {
     try {
       const st = await stat(path);
       const cached = this.activity.get(path);
-      if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached.ts;
-      const ts = await readLastMessageTimestamp(path, st.size);
-      this.activity.set(path, { mtimeMs: st.mtimeMs, size: st.size, ts });
-      return ts;
+      if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) return cached.last;
+      const last = await readLastMessage(path, st.size);
+      this.activity.set(path, { mtimeMs: st.mtimeMs, size: st.size, last });
+      return last;
     } catch {
       return undefined;
     }

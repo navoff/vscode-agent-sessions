@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A session run outside VS Code, in the `claude` or `codex` command line
+  in any terminal, no longer waits for you in VS Code: it is left out of
+  the badge, the tray menu and the notifications, and only shows unread in
+  the view. A Claude Code session is told by the client that wrote its
+  last message, or that runs it now; a Codex session by the process that
+  has it open, or else by the client that started it.
+
 ## 0.4.1 - 2026-11-17
 
 - A Codex session that the Codex plugin of this window keeps loaded can

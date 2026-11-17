@@ -31,8 +31,11 @@ agents' own session stores instead and stays out of their way.
   system notification from a small tray helper, elsewhere with a VS Code
   message with an "Open" button; several sessions that finish at once are
   summed up in one notification. The tray icon lists those sessions in its
-  menu and gets a dot while any wait. The tray helper is used only in local
-  windows; a Remote-SSH window shows VS Code messages.
+  menu and gets a dot while any wait. A session run outside VS Code, in the
+  `claude` or `codex` command line in any terminal, is followed there: it
+  shows unread in the view but is not counted, listed or announced. The
+  tray helper is used only in local windows; a Remote-SSH window shows VS
+  Code messages.
 - **Opens in the native plugin.** Double-click a Claude session and it opens
   in the Claude Code extension; a Codex session opens in the Codex plugin,
   in its side bar or in an editor tab. "Resume in Terminal" prepares the CLI
@@ -91,7 +94,7 @@ agents' own session stores instead and stays out of their way.
 | Order | Sessions in a folder show pinned ones first, then other running sessions, then the rest. Each group goes by last update, most recent first. |
 | Delete | "Delete Session…" or the Delete key (Cmd+Backspace on macOS) in the focused list asks once and deletes permanently, see below. |
 | Several at once | Shift-click and Ctrl-click select several sessions; pin, hide, delete and mark-as-read then apply to the whole selection. |
-| See what waits for you | The badge on the Explorer icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon; a click opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the last active window. |
+| See what waits for you | The badge on the Explorer icon counts unread sessions that are not hidden, on every machine, whatever the view filter. On Linux the same list is in the menu of the tray icon; a click opens a Claude Code session in the window that has its folder open, bringing that window to the front, or in a new window on the folder when none has it; a Codex session opens in the window that shows it or has its folder, or else in the last active window. Sessions run in the `claude` or `codex` command line are left out. |
 | Copy the id | "Copy Session ID". |
 
 ### Filter

@@ -4,7 +4,7 @@ import { watch } from "node:fs";
 import { mkdtemp, mkdir, writeFile, appendFile, readFile, readdir, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ClaudeProvider, type SdkSessionInfo } from "../claude/provider.js";
+import { claudeClient, ClaudeProvider, type SdkSessionInfo } from "../claude/provider.js";
 import { claudeProjectDirName } from "../claude/relocate.js";
 
 function inotifyAvailable(dir: string): boolean {
@@ -352,4 +352,28 @@ test("move refuses a bad id, a missing or duplicated transcript, a bad target an
   await assert.rejects(p.move(ID1, cwd), /transcripts in 2 project folders .*; not moving any of them/);
   assert.equal(await readFile(source, "utf8"), before);
   assert.equal(await readFile(join(projectDir, `${ID1}.jsonl`), "utf8"), "other\n");
+});
+
+test("a Claude session is told vscode or other by its entrypoint", () => {
+  assert.equal(claudeClient("claude-vscode"), "vscode");
+  assert.equal(claudeClient("cli"), "other");
+  assert.equal(claudeClient("sdk-ts"), "other");
+  assert.equal(claudeClient(undefined), undefined);
+});
+
+test("the client of a Claude session comes from its live process, else from its last message", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "claude-"));
+  await mkdir(join(dir, "sessions"));
+  await mkdir(join(dir, "projects", "-w"), { recursive: true });
+  const msg = (ts: number, entrypoint?: string) => jsonl({ type: "assistant", timestamp: new Date(ts).toISOString(), ...(entrypoint ? { entrypoint } : {}) });
+  await writeFile(join(dir, "projects", "-w", "live.jsonl"), msg(T1, "claude-vscode"));
+  await writeFile(join(dir, "projects", "-w", "gone.jsonl"), msg(T1, "claude-vscode") + msg(T2, "cli"));
+  await writeFile(join(dir, "projects", "-w", "old.jsonl"), msg(T1));
+  await writeFile(join(dir, "sessions", "600.json"), JSON.stringify({ pid: 600, sessionId: "live", cwd: "/w", status: "idle", updatedAt: 1, statusUpdatedAt: 1, entrypoint: "cli" }));
+  const list = ["live", "gone", "old"].map((sessionId) => ({ sessionId, summary: sessionId, cwd: "/w", lastModified: 1 }));
+  const p = new ClaudeProvider({ claudeDir: dir, listSessions: async () => list, isAlive: () => true });
+  const byId = new Map((await p.snapshot()).map((s) => [s.id, s]));
+  assert.equal(byId.get("live")!.client, "other");
+  assert.equal(byId.get("gone")!.client, "other");
+  assert.ok(!("client" in byId.get("old")!));
 });

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { readSessionIndex } from "../codex/sessionIndex.js";
 import { listRolloutFiles } from "../codex/discovery.js";
 import { AppServerExitError, type AppServerRequest } from "../codex/appServer.js";
-import { codexHeldError, codexHolderFromError } from "../codex/holder.js";
+import { codexClientOfCommand, codexClientOfOriginator, codexHeldError, codexHolderFromError } from "../codex/holder.js";
 import { CodexProvider, type CommandResult, type CommandRunner } from "../codex/provider.js";
 
 const meta = (payload: Record<string, unknown>) => JSON.stringify({ type: "session_meta", payload });
@@ -398,4 +398,51 @@ test("the pid of a held-thread error is read back from its text, and only from s
   assert.equal(codexHolderFromError(codexHeldError(939095)), 939095);
   assert.equal(codexHolderFromError(`Could not delete "x": ${codexHeldError(12)}`), 12);
   assert.equal(codexHolderFromError("codex delete failed (exit 1)"), undefined);
+});
+
+test("a Codex holder is the VS Code plugin by the path of its binary", () => {
+  assert.equal(codexClientOfCommand("/home/u/.vscode/extensions/openai.chatgpt-26.51007.21434/bin/linux-x86_64/codex"), "vscode");
+  assert.equal(codexClientOfCommand("/home/u/.vscode-server/extensions/openai.chatgpt-26.1/bin/linux-x86_64/codex"), "vscode");
+  assert.equal(codexClientOfCommand("/home/u/.codex/packages/app-server-daemon/releases/0.169.0/bin/codex"), "other");
+  assert.equal(codexClientOfCommand("codex"), "other");
+  assert.equal(codexClientOfOriginator("codex_vscode"), "vscode");
+  assert.equal(codexClientOfOriginator("codex-tui"), "other");
+  assert.equal(codexClientOfOriginator(undefined), undefined);
+});
+
+test("the client of a Codex session is its lock holder, else its originator", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "codex-client-"));
+  const day = join(dir, "sessions", "2026", "11", "17");
+  const lockDir = join(dir, "thread-writer-locks");
+  await mkdir(day, { recursive: true });
+  await mkdir(lockDir, { recursive: true });
+  const ids = { tuiHeldByVscode: "0199a1b2-c3d4-7e5f-8a9b-000000000001", vscodeHeldByTui: "0199a1b2-c3d4-7e5f-8a9b-000000000002", free: "0199a1b2-c3d4-7e5f-8a9b-000000000003", unknown: "0199a1b2-c3d4-7e5f-8a9b-000000000004" };
+  const originators: Record<string, string | undefined> = { tuiHeldByVscode: "codex-tui", vscodeHeldByTui: "codex_vscode", free: "codex-tui", unknown: undefined };
+  let lines = "";
+  const pids: Record<string, number> = { tuiHeldByVscode: 101, vscodeHeldByTui: 202 };
+  for (const [name, id] of Object.entries(ids)) {
+    const payload: Record<string, unknown> = { id, timestamp: "2026-11-17T10:00:00.000Z", cwd: "/w", thread_source: "user" };
+    if (originators[name]) payload.originator = originators[name];
+    await writeFile(join(day, `rollout-2026-11-17T10-00-00-${id}.jsonl`), [meta(payload), userMsg("hi"), event("task_complete")].join("\n") + "\n");
+    const lock = join(lockDir, `${id}.lock`);
+    await writeFile(lock, "");
+    const pid = pids[name];
+    if (pid === undefined) continue;
+    const st = await stat(lock);
+    const major = (Math.floor(st.dev / 256) & 0xfff).toString(16);
+    const minor = ((st.dev & 0xff) | (Math.floor(st.dev / 4096) & 0xfff00)).toString(16);
+    lines += `1: FLOCK  ADVISORY  WRITE ${pid} ${major}:${minor}:${st.ino} 0 EOF\n`;
+  }
+  const locks = join(dir, "proc-locks");
+  await writeFile(locks, lines);
+  const commands: Record<number, string[]> = {
+    101: ["/home/u/.vscode/extensions/openai.chatgpt-26.1/bin/linux-x86_64/codex", "app-server"],
+    202: ["/usr/local/bin/codex", "resume"],
+  };
+  const p = new CodexProvider({ codexDir: dir, procLocksPath: locks, readCmdline: async (pid) => commands[pid] });
+  const byId = new Map((await p.snapshot()).map((s) => [s.id, s]));
+  assert.equal(byId.get(ids.tuiHeldByVscode)!.client, "vscode");
+  assert.equal(byId.get(ids.vscodeHeldByTui)!.client, "other");
+  assert.equal(byId.get(ids.free)!.client, "other");
+  assert.ok(!("client" in byId.get(ids.unknown)!));
 });

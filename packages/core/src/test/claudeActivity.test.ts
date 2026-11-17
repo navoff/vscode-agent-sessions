@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { indexSessionFiles, lastMessageTimestamp, readLastMessageTimestamp } from "../claude/activity.js";
+import { indexSessionFiles, lastMessage, lastMessageTimestamp, readLastMessageTimestamp } from "../claude/activity.js";
 
 const T1 = "2026-09-29T10:00:00.000Z";
 const T2 = "2026-09-29T10:17:49.000Z";
@@ -70,4 +70,12 @@ test("indexSessionFiles maps top-level jsonl files only", async () => {
 
 test("indexSessionFiles returns an empty map for a missing dir", async () => {
   assert.equal((await indexSessionFiles(join(tmpdir(), "no-such-dir-xyz"))).size, 0);
+});
+
+test("lastMessage gives the entrypoint of the last message, skipping bookkeeping", () => {
+  const vscode = rec({ type: "user", timestamp: T1, entrypoint: "claude-vscode" });
+  const cli = rec({ type: "assistant", timestamp: T2, entrypoint: "cli" });
+  assert.deepEqual(lastMessage(vscode + cli + bookkeeping + rec({ type: "attachment", timestamp: T3, entrypoint: "x" })), { timestamp: Date.parse(T2), entrypoint: "cli" });
+  assert.deepEqual(lastMessage(user(T1)), { timestamp: Date.parse(T1) });
+  assert.equal(lastMessage(bookkeeping), undefined);
 });

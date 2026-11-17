@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import type { Disposable, SessionInfo, SessionProvider } from "../types.js";
@@ -9,8 +9,9 @@ import { normalizeSessionTitle } from "../util/sessionTitle.js";
 import { guardWatcher } from "../util/watch.js";
 import { AppServerExitError, appServerRequest, type AppServerRequest } from "./appServer.js";
 import { listRolloutFiles } from "./discovery.js";
-import { codexHeldError, codexThreadHolder } from "./holder.js";
-import { readRolloutInfo, type CodexRolloutInfo } from "./rollout.js";
+import { codexClientOfCommand, codexClientOfOriginator, codexHeldError, codexThreadHolder, codexThreadLockPath, procCmdline } from "./holder.js";
+import { readRolloutInfo, type CodexRolloutInfo, type CodexRolloutMeta } from "./rollout.js";
+import { lockHolderFromProcLocks } from "../util/fileLock.js";
 import { readSessionIndex } from "./sessionIndex.js";
 
 export interface CommandResult {
@@ -63,6 +64,8 @@ export interface CodexProviderOptions {
   moveTimeoutMs?: number;
   /** Where to read kernel file locks from; for tests. Default /proc/locks. */
   procLocksPath?: string;
+  /** Reads the command line of a process; for tests. Default /proc/<pid>/cmdline. */
+  readCmdline?: (pid: number) => Promise<string[] | undefined>;
 }
 
 interface CacheEntry {
@@ -83,6 +86,7 @@ export class CodexProvider implements SessionProvider {
   private readonly renameTimeoutMs: number;
   private readonly moveTimeoutMs: number;
   private readonly procLocksPath: string | undefined;
+  private readonly readCmdline: (pid: number) => Promise<string[] | undefined>;
 
   constructor(opts: CodexProviderOptions = {}) {
     this.codexDir = opts.codexDir ?? join(homedir(), ".codex");
@@ -94,6 +98,7 @@ export class CodexProvider implements SessionProvider {
     this.renameTimeoutMs = opts.renameTimeoutMs ?? RENAME_TIMEOUT_MS;
     this.moveTimeoutMs = opts.moveTimeoutMs ?? MOVE_TIMEOUT_MS;
     this.procLocksPath = opts.procLocksPath;
+    this.readCmdline = opts.readCmdline ?? procCmdline;
   }
 
   async snapshot(): Promise<SessionInfo[]> {
@@ -104,6 +109,7 @@ export class CodexProvider implements SessionProvider {
     ]);
     const seen = new Set<string>();
     const result = new Map<string, SessionInfo>();
+    const metaOf = new Map<string, CodexRolloutMeta>();
     for (const file of files) {
       seen.add(file);
       let st;
@@ -140,9 +146,34 @@ export class CodexProvider implements SessionProvider {
       };
       if (info.firstPrompt) session.firstPrompt = info.firstPrompt;
       result.set(info.meta.id, session);
+      metaOf.set(info.meta.id, info.meta);
     }
     for (const key of this.cache.keys()) if (!seen.has(key)) this.cache.delete(key);
+    await this.setClients(result, metaOf);
     return [...result.values()];
+  }
+
+  /**
+   * Tells who runs each session: the process holding its writer lock, the
+   * Codex extension of VS Code or anything else; with no holder, the client
+   * that started it. The lock table is read once for the whole snapshot.
+   */
+  private async setClients(sessions: Map<string, SessionInfo>, metaOf: Map<string, CodexRolloutMeta>): Promise<void> {
+    const locks = await readFile(this.procLocksPath ?? "/proc/locks", "utf8").catch(() => undefined);
+    const commands = new Map<number, Promise<string[] | undefined>>();
+    for (const session of sessions.values()) {
+      let client = codexClientOfOriginator(metaOf.get(session.id)?.originator);
+      if (locks !== undefined) {
+        const st = await stat(codexThreadLockPath(this.codexDir, session.id)).catch(() => undefined);
+        const holder = st ? lockHolderFromProcLocks(locks, st.dev, st.ino) : undefined;
+        if (holder !== undefined) {
+          if (!commands.has(holder)) commands.set(holder, this.readCmdline(holder));
+          const argv0 = (await commands.get(holder))?.[0];
+          if (argv0 !== undefined) client = codexClientOfCommand(argv0);
+        }
+      }
+      if (client) session.client = client;
+    }
   }
 
   /**

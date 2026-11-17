@@ -8,6 +8,8 @@ export interface ClaudeLiveEntry {
   status: "busy" | "idle";
   updatedAt: number;
   statusUpdatedAt: number;
+  /** The Claude Code client of the process: `claude-vscode`, `cli`, ... */
+  entrypoint?: string;
 }
 
 export function parseClaudeLiveEntry(text: string): ClaudeLiveEntry | undefined {
@@ -22,7 +24,7 @@ export function parseClaudeLiveEntry(text: string): ClaudeLiveEntry | undefined 
   if (typeof r.pid !== "number" || typeof r.sessionId !== "string") return undefined;
   const status = r.status === "busy" ? "busy" : r.status === "idle" ? "idle" : undefined;
   if (!status) return undefined;
-  return {
+  const entry: ClaudeLiveEntry = {
     pid: r.pid,
     sessionId: r.sessionId,
     cwd: typeof r.cwd === "string" ? r.cwd : "",
@@ -30,6 +32,8 @@ export function parseClaudeLiveEntry(text: string): ClaudeLiveEntry | undefined 
     updatedAt: typeof r.updatedAt === "number" ? r.updatedAt : 0,
     statusUpdatedAt: typeof r.statusUpdatedAt === "number" ? r.statusUpdatedAt : 0,
   };
+  if (typeof r.entrypoint === "string") entry.entrypoint = r.entrypoint;
+  return entry;
 }
 
 export function isProcessAlive(pid: number): boolean {

@@ -22,6 +22,13 @@ test("attentionRows keeps unread, visible sessions of every machine, newest firs
   assert.deepEqual(attentionRows(rows, never).map((r) => `${r.machineId}/${r.session.id}`), ["box/d", "local/a"]);
 });
 
+test("attentionRows leaves out sessions run outside VS Code", () => {
+  const rows = new Map<string, SessionRow[]>([
+    ["local", [row("local", s("cli", { client: "other", updatedAt: 300 })), row("local", s("ext", { client: "vscode", updatedAt: 200 })), row("local", s("old", { updatedAt: 100 }))]],
+  ]);
+  assert.deepEqual(attentionRows(rows, never).map((r) => r.session.id), ["ext", "old"]);
+});
+
 test("attentionRows drops sessions of hidden folders", () => {
   const rows = new Map<string, SessionRow[]>([["local", [row("local", s("a", { cwd: "/hidden" })), row("local", s("b", { cwd: "/w" }))]]]);
   const hidden = (machineId: string, cwd: string) => machineId === "local" && cwd === "/hidden";

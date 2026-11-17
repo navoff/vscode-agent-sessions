@@ -340,6 +340,7 @@ test("sameSession compares the fields that matter", () => {
   assert.ok(sameSession(s("claude", "a"), s("claude", "a")));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { status: "running" })));
   assert.ok(!sameSession(s("claude", "a"), s("claude", "a", { firstPrompt: "p" })));
+  assert.ok(!sameSession(s("claude", "a", { client: "vscode" }), s("claude", "a", { client: "other" })));
   const live = (pid: number, statusUpdatedAt: number) => s("claude", "a", { live: { pid, statusUpdatedAt } });
   assert.ok(sameSession(live(1, 10), live(1, 10)));
   assert.ok(!sameSession(live(1, 10), live(2, 10)));

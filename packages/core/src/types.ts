@@ -1,5 +1,7 @@
 export type AgentKind = "claude" | "codex" | "opencode";
 export type SessionStatus = "running" | "idle" | "unknown";
+/** Who runs a session: the agent's VS Code extension, or anything else (a CLI, a TUI, a background process). */
+export type SessionClient = "vscode" | "other";
 
 export interface SessionLiveInfo {
   pid: number;
@@ -16,6 +18,8 @@ export interface SessionInfo {
   createdAt: number;
   updatedAt: number;
   status: SessionStatus;
+  /** Who runs the session now, or ran it last; absent when it cannot be told. */
+  client?: SessionClient;
   live?: SessionLiveInfo;
 }
 

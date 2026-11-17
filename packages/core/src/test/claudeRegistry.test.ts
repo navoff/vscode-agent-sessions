@@ -37,3 +37,8 @@ test("readClaudeRegistry returns empty map for missing dir", async () => {
   const reg = await readClaudeRegistry("/nonexistent/dir", () => true);
   assert.equal(reg.size, 0);
 });
+
+test("parseClaudeLiveEntry keeps the entrypoint of the process", () => {
+  assert.equal(parseClaudeLiveEntry(entry({ entrypoint: "cli" }))?.entrypoint, "cli");
+  assert.equal(parseClaudeLiveEntry(entry())?.entrypoint, undefined);
+});

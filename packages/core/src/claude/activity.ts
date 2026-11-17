@@ -1,22 +1,29 @@
 import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+/** The last `user` or `assistant` record: when it was written, and by which Claude Code client. */
+export interface LastMessage {
+  timestamp: number;
+  /** `claude-vscode`, `cli`, ...: Claude Code writes it into every message. */
+  entrypoint?: string;
+}
+
 /**
- * Timestamp of the last `user` or `assistant` record in a piece of jsonl text.
- * Claude Code also appends bookkeeping records (last-prompt, cost-state, ...)
- * when a tab is opened or closed; those must not count as activity.
+ * The last `user` or `assistant` record in a piece of jsonl text. Claude
+ * Code also appends bookkeeping records (last-prompt, cost-state, ...) when
+ * a tab is opened or closed; those must not count as activity.
  */
-export function lastMessageTimestamp(tailText: string): number | undefined {
+export function lastMessage(tailText: string): LastMessage | undefined {
   const lines = tailText.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     if (!line.includes('"timestamp"')) continue;
     if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) continue;
     try {
-      const rec = JSON.parse(line) as { type?: unknown; timestamp?: unknown };
+      const rec = JSON.parse(line) as { type?: unknown; timestamp?: unknown; entrypoint?: unknown };
       if ((rec.type === "user" || rec.type === "assistant") && typeof rec.timestamp === "string") {
         const ts = Date.parse(rec.timestamp);
-        if (Number.isFinite(ts)) return ts;
+        if (Number.isFinite(ts)) return typeof rec.entrypoint === "string" ? { timestamp: ts, entrypoint: rec.entrypoint } : { timestamp: ts };
       }
     } catch {
       // partial or garbage line
@@ -25,12 +32,17 @@ export function lastMessageTimestamp(tailText: string): number | undefined {
   return undefined;
 }
 
-/** Reads the tail of a session file (attachment records can be hundreds of KB). */
-export async function readLastMessageTimestamp(
+/** Timestamp of the last `user` or `assistant` record, see `lastMessage`. */
+export function lastMessageTimestamp(tailText: string): number | undefined {
+  return lastMessage(tailText)?.timestamp;
+}
+
+/** The last message of a session file, read from its tail (attachment records can be hundreds of KB). */
+export async function readLastMessage(
   filePath: string,
   size: number,
   maxBytes = 512 * 1024,
-): Promise<number | undefined> {
+): Promise<LastMessage | undefined> {
   const length = Math.min(size, maxBytes);
   if (length <= 0) return undefined;
   const fh = await open(filePath, "r");
@@ -42,10 +54,15 @@ export async function readLastMessageTimestamp(
       const nl = text.indexOf("\n");
       text = nl === -1 ? "" : text.slice(nl + 1);
     }
-    return lastMessageTimestamp(text);
+    return lastMessage(text);
   } finally {
     await fh.close();
   }
+}
+
+/** Timestamp of the last message of a session file, see `readLastMessage`. */
+export async function readLastMessageTimestamp(filePath: string, size: number, maxBytes = 512 * 1024): Promise<number | undefined> {
+  return (await readLastMessage(filePath, size, maxBytes))?.timestamp;
 }
 
 /** Maps session id to its jsonl path for every `<projectsDir>/<project>/<id>.jsonl`. */
