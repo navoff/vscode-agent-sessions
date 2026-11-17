@@ -12,6 +12,15 @@
   menu of a remote machine set whether it connects on startup and after a
   dropped connection, which so far took editing `machines.json`. Turning it
   on also connects the machine now.
+- A click on the notification of a Codex session started in a new Codex
+  tab brings that tab forward instead of opening the session in another
+  one, and viewing the tab marks the session read. Codex does not say
+  which thread such a tab shows, so the thread is tied to the tab that
+  was in front in the focused window when it was created.
+- A click on the notification of a Codex session goes to the window open
+  on the session's folder, as it does for Claude Code, unless the window
+  that got the click already shows the session. With no window on the
+  folder the session opens where it was clicked.
 
 ## 0.3.1 - 2026-11-02
 

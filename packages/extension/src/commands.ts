@@ -9,6 +9,7 @@ import { selectionTargets } from "./tree/selection.js";
 import { DoubleClickDetector } from "./tree/clickDetector.js";
 import { claudeFindsSession, isDirectory, isWindowFolder, newSessionRequest, remoteFolderUri } from "./claudeFolder.js";
 import { codexTabSessionId } from "./state/viewedSession.js";
+import type { CodexTabTracker } from "./state/codexTabs.js";
 import { windowRecordTarget, type WindowRecord } from "./state/windowRegistry.js";
 
 export type { FilterState };
@@ -32,6 +33,8 @@ export interface CommandDeps {
   windowFor(cwd: string): Promise<WindowRecord | undefined>;
   /** The ssh host of a remote machine, undefined for the local one. */
   sshHost(machineId: string): string | undefined;
+  /** The threads of Codex new-chat tabs in this window. */
+  codexTabs: Pick<CodexTabTracker, "tabOf">;
   log: vscode.OutputChannel;
 }
 
@@ -75,21 +78,36 @@ export function codexConversationUri(sessionId: string): vscode.Uri {
   return vscode.Uri.file(`/local/${sessionId}`).with({ scheme: "openai-codex", authority: "route" });
 }
 
+/** The resource of a Codex conversation tab, if `tab` is one. */
+function codexTabUri(tab: vscode.Tab | undefined): vscode.Uri | undefined {
+  const input = tab?.input;
+  return input instanceof vscode.TabInputCustom && input.viewType === CODEX_EDITOR_VIEW_TYPE && input.uri.scheme === "openai-codex" ? input.uri : undefined;
+}
+
+/**
+ * The key of a Codex tab whose resource names no thread: a new chat, whose
+ * thread is told by `CodexTabTracker`.
+ */
+export function codexNewChatTabKey(tab: vscode.Tab | undefined): string | undefined {
+  const uri = codexTabUri(tab);
+  return uri && !codexTabSessionId(uri.path) ? uri.toString() : undefined;
+}
+
 /** The editor tab already showing the Codex session, if any. */
-function codexTabOf(sessionId: string): vscode.Tab | undefined {
+function codexTabOf(sessionId: string, newChatTab: string | undefined): vscode.Tab | undefined {
   for (const group of vscode.window.tabGroups.all) {
     for (const tab of group.tabs) {
-      const input = tab.input;
-      if (input instanceof vscode.TabInputCustom && input.viewType === CODEX_EDITOR_VIEW_TYPE && input.uri.scheme === "openai-codex" && codexTabSessionId(input.uri.path) === sessionId) return tab;
+      const uri = codexTabUri(tab);
+      if (uri && (codexTabSessionId(uri.path) === sessionId || (newChatTab !== undefined && uri.toString() === newChatTab))) return tab;
     }
   }
   return undefined;
 }
 
-async function openCodexThread(sessionId: string): Promise<void> {
+async function openCodexThread(deps: CommandDeps, sessionId: string): Promise<void> {
   // A tab that already shows the session is brought forward instead of
   // asking Codex, which would open the session in another tab.
-  const open = codexTabOf(sessionId);
+  const open = codexTabOf(sessionId, deps.codexTabs.tabOf(sessionId));
   if (open && open.input instanceof vscode.TabInputCustom) {
     await vscode.commands.executeCommand("vscode.openWith", open.input.uri, open.input.viewType, { viewColumn: open.group.viewColumn, preview: false, preserveFocus: false });
     return;
@@ -269,6 +287,20 @@ export async function raiseThisWindow(): Promise<void> {
   if (target) await vscode.commands.executeCommand("vscode.openFolder", target, { forceNewWindow: true });
 }
 
+/**
+ * Codex opens a thread in any window, so a click from outside VS Code that
+ * reached this window goes on to another one only when that window is on the
+ * session's folder and this one neither shows the session nor has the folder.
+ */
+async function codexBelongsElsewhere(deps: CommandDeps, session: SessionInfo): Promise<boolean> {
+  if (codexTabOf(session.id, deps.codexTabs.tabOf(session.id))) return false;
+  const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+  if (await isWindowFolder(session.cwd, folders)) return false;
+  if (!(await isDirectory(session.cwd))) return false;
+  // A window is told by its first folder, which this one has been checked against.
+  return (await deps.windowFor(session.cwd).catch(() => undefined)) !== undefined;
+}
+
 export async function openSession(deps: CommandDeps, machineId: string, session: SessionInfo, opts?: OpenSessionOptions): Promise<void> {
   if (machineId !== "local") return openRemoteSession(deps, machineId, session);
   if (!checkSessionId(session.id)) return;
@@ -284,10 +316,14 @@ export async function openSession(deps: CommandDeps, machineId: string, session:
     if (!here) return offerClaudeFolder(deps, session);
     await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
   } else if (session.agent === "codex") {
+    if (opts?.autoHandOver && (await codexBelongsElsewhere(deps, session))) {
+      await handOverToWindow(deps, session);
+      return;
+    }
     if (opts?.raise) await raiseThisWindow();
     if (!vscode.extensions.getExtension(CODEX_EXTENSION) && !(await offerInstall(CODEX_EXTENSION, "Codex"))) return;
     warnAboutCodexStartup();
-    await openCodexThread(session.id);
+    await openCodexThread(deps, session.id);
   } else {
     void vscode.window.showInformationMessage(`Opening ${session.agent} sessions is not supported yet.`);
     return;

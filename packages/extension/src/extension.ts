@@ -11,7 +11,7 @@ import { connectLocalDaemon, localDaemonPaths } from "./connection/localConnecti
 import { daemonBuildId, daemonFreshForMs, daemonProcessAlive, readDaemonPid, stopDaemonProcess } from "./connection/sharedDaemon.js";
 import { spawnSshDaemon } from "./connection/sshConnection.js";
 import { createSshRunner } from "./connection/sshRunner.js";
-import { CODEX_EDITOR_VIEW_TYPE, confirmAndMoveSessions, openSession, raiseThisWindow, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
+import { CODEX_EDITOR_VIEW_TYPE, codexNewChatTabKey, confirmAndMoveSessions, openSession, raiseThisWindow, registerSessionCommands, startNewSession, type CommandDeps, type FilterState } from "./commands.js";
 import { canonical, claudeFindsSession, isNewSessionRequest, pendingSessionFor } from "./claudeFolder.js";
 import { findWindowForFolder, removeWindowRecord, writeWindowRecord } from "./state/windowRegistry.js";
 import { parseMachinesFileStrict, readMachinesFile, serializeMachinesFile, writeMachinesFile, type MachinesFile } from "./machines/machinesFile.js";
@@ -27,6 +27,7 @@ import { TrayClient, trayBinaryPath, traySocketPath, vscodeCliPath } from "./tra
 import { nodeTrayIo } from "./tray/trayIo.js";
 import { SessionStore, type SessionRow } from "./state/sessionStore.js";
 import { parentPid } from "./state/processParent.js";
+import { CodexTabTracker } from "./state/codexTabs.js";
 import { codexTabSessionId, pickByElimination, pickViewed, tabCandidates, type AgentTab } from "./state/viewedSession.js";
 import { SessionsDragAndDrop } from "./tree/dragDropController.js";
 import type { MachineInput } from "./tree/treeModel.js";
@@ -282,10 +283,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const input = tab?.input;
     if (input instanceof vscode.TabInputWebview && input.viewType.endsWith(CLAUDE_PANEL_VIEW_TYPE)) return { agent: "claude", label: tab?.label ?? "" };
     if (input instanceof vscode.TabInputCustom && input.viewType === CODEX_EDITOR_VIEW_TYPE && input.uri.scheme === "openai-codex") {
-      const sessionId = codexTabSessionId(input.uri.path);
+      const newChat = codexNewChatTabKey(tab);
+      const sessionId = newChat ? codexTabs.sessionOf(newChat) : codexTabSessionId(input.uri.path);
       if (sessionId) return { agent: "codex", sessionId };
     }
     return undefined;
+  };
+  // Codex new-chat tabs do not name their thread; it is told by the tab that
+  // was in front when the thread was created (see state/codexTabs.ts).
+  const codexTabs = new CodexTabTracker();
+  const trackCodexTabs = () => {
+    const now = Date.now();
+    codexTabs.noteActive(now, vscode.window.state.focused ? codexNewChatTabKey(vscode.window.tabGroups.activeTabGroup.activeTab) : undefined);
+    const open = new Set<string>();
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const key = codexNewChatTabKey(tab);
+        if (key) open.add(key);
+      }
+    }
+    const threads = store.rows(LOCAL_ID).filter((r) => r.session.agent === "codex").map((r) => r.session);
+    codexTabs.update(threads, open, now);
   };
   const isClaudeTab = (tab: vscode.Tab): boolean => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith(CLAUDE_PANEL_VIEW_TYPE);
   // Claude Code runs the sessions of this window's tabs as children of the
@@ -324,6 +342,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refresh();
   };
   const onViewChange = () => {
+    trackCodexTabs();
     markViewedRead().catch((err) => appendLog(`[${LOCAL_ID}] marking the viewed session read failed: ${String(err)}`));
   };
   context.subscriptions.push(
@@ -628,6 +647,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const c = connections.get(machineId);
       return c ? c.pendingOpen(session) : Promise.reject(new Error("the machine is not connected"));
     },
+    codexTabs,
     sshHost: (machineId) => machines.machines.find((m) => m.id === machineId)?.sshHost,
     windowFor: async (cwd) => {
       if (!windowRecordsWanted) return undefined;
