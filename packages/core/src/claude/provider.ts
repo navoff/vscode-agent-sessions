@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Disposable, SessionClient, SessionInfo, SessionProvider } from "../types.js";
 import { normalizeFirstPrompt } from "../util/firstPrompt.js";
 import { isValidSessionId } from "../util/sessionId.js";
@@ -10,7 +10,7 @@ import { guardWatcher } from "../util/watch.js";
 import { indexSessionFiles, readLastMessage, type LastMessage } from "./activity.js";
 import { readPromptText } from "./firstPrompt.js";
 import { isProcessAlive, readClaudeRegistry } from "./registry.js";
-import { relocateTranscript } from "./relocate.js";
+import { claudeProjectDirName, relocateTranscript } from "./relocate.js";
 
 export interface SdkSessionInfo {
   sessionId: string;
@@ -83,6 +83,22 @@ interface ActivityEntry {
   last: LastMessage | undefined;
 }
 
+/**
+ * The working directory of a session: the SDK's, unless the project folder
+ * of the transcript belongs to another directory. That happens to a fork of
+ * a moved session: Claude Code copies the messages, written in the old
+ * directory, but not the "relocated" entries the SDK takes the directory
+ * from. Claude Code finds a session by its project folder, so the first
+ * candidate whose project folder holds the transcript wins; the SDK's cwd
+ * stays when none does.
+ */
+export function sessionCwd(transcript: string, sdkCwd: string | undefined, candidates: ReadonlyArray<string | undefined>): string | undefined {
+  const project = basename(dirname(transcript));
+  const holds = (cwd: string | undefined): cwd is string => cwd !== undefined && cwd !== "" && claudeProjectDirName(cwd) === project;
+  if (sdkCwd === undefined || holds(sdkCwd)) return sdkCwd;
+  return candidates.find(holds) ?? sdkCwd;
+}
+
 /** Whether a Claude Code client is the VS Code extension; undefined without one. */
 export function claudeClient(entrypoint: string | undefined): SessionClient | undefined {
   if (!entrypoint) return undefined;
@@ -127,26 +143,30 @@ export class ClaudeProvider implements SessionProvider {
     const updated = new Map<string, number>();
     const entrypoints = new Map<string, string>();
     const prompts = new Map<string, string>();
+    const cwds = new Map<string, string>();
     for (const s of sessions) {
       const path = files.get(s.sessionId);
       if (!path) continue;
       const last = await this.lastMessage(path);
       if (last !== undefined) updated.set(s.sessionId, last.timestamp);
       if (last?.entrypoint) entrypoints.set(s.sessionId, last.entrypoint);
+      const cwd = sessionCwd(path, s.cwd, [registry.get(s.sessionId)?.cwd, last?.cwd]);
+      if (cwd) cwds.set(s.sessionId, cwd);
       const prompt = s.firstPrompt ? await this.promptText(path, s.firstPrompt) : undefined;
       if (prompt !== undefined) prompts.set(s.sessionId, prompt);
       seen.add(path);
     }
     for (const key of this.activity.keys()) if (!seen.has(key)) this.activity.delete(key);
     for (const key of this.prompts.keys()) if (!seen.has(key)) this.prompts.delete(key);
-    this.cwds = new Map(sessions.filter((s) => s.cwd).map((s) => [s.sessionId, s.cwd as string]));
+    for (const s of sessions) if (s.cwd && !cwds.has(s.sessionId)) cwds.set(s.sessionId, s.cwd);
+    this.cwds = cwds;
     return sessions.map((s) => {
       const live = registry.get(s.sessionId);
       const info: SessionInfo = {
         agent: "claude",
         id: s.sessionId,
         title: s.customTitle || s.summary || s.firstPrompt || s.sessionId,
-        cwd: s.cwd ?? live?.cwd ?? "",
+        cwd: cwds.get(s.sessionId) ?? live?.cwd ?? "",
         createdAt: s.createdAt ?? s.lastModified,
         updatedAt: updated.get(s.sessionId) ?? s.lastModified,
         status: live ? (live.status === "busy" ? "running" : "idle") : "idle",

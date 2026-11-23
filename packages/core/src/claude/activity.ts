@@ -1,11 +1,13 @@
 import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
-/** The last `user` or `assistant` record: when it was written, and by which Claude Code client. */
+/** The last `user` or `assistant` record: when it was written, by which Claude Code client and in which directory. */
 export interface LastMessage {
   timestamp: number;
   /** `claude-vscode`, `cli`, ...: Claude Code writes it into every message. */
   entrypoint?: string;
+  /** The working directory of the session when the message was written. */
+  cwd?: string;
 }
 
 /**
@@ -20,10 +22,14 @@ export function lastMessage(tailText: string): LastMessage | undefined {
     if (!line.includes('"timestamp"')) continue;
     if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) continue;
     try {
-      const rec = JSON.parse(line) as { type?: unknown; timestamp?: unknown; entrypoint?: unknown };
+      const rec = JSON.parse(line) as { type?: unknown; timestamp?: unknown; entrypoint?: unknown; cwd?: unknown };
       if ((rec.type === "user" || rec.type === "assistant") && typeof rec.timestamp === "string") {
         const ts = Date.parse(rec.timestamp);
-        if (Number.isFinite(ts)) return typeof rec.entrypoint === "string" ? { timestamp: ts, entrypoint: rec.entrypoint } : { timestamp: ts };
+        if (!Number.isFinite(ts)) continue;
+        const last: LastMessage = { timestamp: ts };
+        if (typeof rec.entrypoint === "string") last.entrypoint = rec.entrypoint;
+        if (typeof rec.cwd === "string" && rec.cwd) last.cwd = rec.cwd;
+        return last;
       }
     } catch {
       // partial or garbage line

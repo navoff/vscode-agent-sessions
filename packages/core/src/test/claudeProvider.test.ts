@@ -377,3 +377,36 @@ test("the client of a Claude session comes from its live process, else from its 
   assert.equal(byId.get("gone")!.client, "other");
   assert.ok(!("client" in byId.get("old")!));
 });
+
+test("the cwd of a session is one whose project folder holds its transcript", async () => {
+  // A fork of a session moved from /x/nota to /x/ai: Claude Code copies the
+  // messages (cwd /x/nota) into the project folder of /x/ai but not the
+  // "relocated" entries, so the SDK gives /x/nota.
+  const dir = await mkdtemp(join(tmpdir(), "claude-"));
+  await mkdir(join(dir, "sessions"));
+  const ai = join(dir, "projects", claudeProjectDirName("/x/ai")!);
+  await mkdir(ai, { recursive: true });
+  const msg = (cwd: string) => jsonl({ type: "assistant", timestamp: new Date(T1).toISOString(), cwd });
+  await writeFile(join(ai, "live.jsonl"), msg("/x/nota"));
+  await writeFile(join(ai, "gone.jsonl"), msg("/x/nota") + msg("/x/ai"));
+  await writeFile(join(ai, "lost.jsonl"), msg("/x/nota") + msg("/x/other"));
+  await writeFile(join(ai, "here.jsonl"), msg("/x/ai"));
+  await writeFile(join(dir, "sessions", "600.json"), JSON.stringify({ pid: 600, sessionId: "live", cwd: "/x/ai", status: "idle", updatedAt: 1, statusUpdatedAt: 1 }));
+  await writeFile(join(dir, "sessions", "601.json"), JSON.stringify({ pid: 601, sessionId: "here", cwd: "/x/elsewhere", status: "idle", updatedAt: 1, statusUpdatedAt: 1 }));
+  const list: SdkSessionInfo[] = [
+    { sessionId: "live", summary: "s", cwd: "/x/nota", lastModified: 1 },
+    { sessionId: "gone", summary: "s", cwd: "/x/nota", lastModified: 1 },
+    { sessionId: "lost", summary: "s", cwd: "/x/nota", lastModified: 1 },
+    { sessionId: "here", summary: "s", cwd: "/x/ai", lastModified: 1 },
+  ];
+  const p = new ClaudeProvider({ claudeDir: dir, listSessions: async () => list, isAlive: () => true });
+  const cwd = new Map((await p.snapshot()).map((s) => [s.id, s.cwd]));
+  // The live process runs in the folder that holds the transcript.
+  assert.equal(cwd.get("live"), "/x/ai");
+  // No process: the last message was written there.
+  assert.equal(cwd.get("gone"), "/x/ai");
+  // Nothing matches the project folder: the SDK's cwd stays.
+  assert.equal(cwd.get("lost"), "/x/nota");
+  // The SDK's cwd matches: it is kept whatever the process says.
+  assert.equal(cwd.get("here"), "/x/ai");
+});

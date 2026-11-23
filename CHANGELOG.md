@@ -13,6 +13,11 @@
   `.code-workspace` file. With the file outside its folders, "New
   Session…" on that row opened another VS Code window on the file's
   folder instead of starting the session in this one.
+- A fork of a Claude Code session that was moved to another folder opens
+  in the window it runs in. Claude Code gives the fork the folder the
+  session was started in, so a click on its notification opened a new VS
+  Code window on that folder, or an empty Claude Code tab in the window
+  that had it open.
 
 ## 0.4.1 - 2026-11-17
 
