@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 - 2026-11-23
 
 - A session run outside VS Code, in the `claude` or `codex` command line
   in any terminal, no longer waits for you in VS Code: it is left out of
